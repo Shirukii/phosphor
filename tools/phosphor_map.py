@@ -3,6 +3,7 @@
 
     phosphor_map.py SHADED [--frame NAME=LINEART ...] [--idle NAME] [--size WxH]
                     [--eye X0,X1,Y0,Y1] [--out map.ts] [--export LEDMAP]
+                    [--png DIR | --no-png] [--dots N[,N...]] [--backgrounds none,black,white,grey]
 
 SHADED is the picture lit the way the dots should be lit, on black (any image; converted to grey).
 Each --frame is the line art of one frame, on a transparent background (RGBA), framed exactly like
@@ -14,6 +15,15 @@ Everything is resized to --size (default 340x280), the map's size: one value per
 
 Writes a TypeScript module (default map.ts) exporting the map: 4 bits per value, base64, plus a
 small patch per other frame and the silhouette (1 bit). No image files, so the picture is pure code.
+
+Also writes a PNG of every frame (state) in every colour preset (src/presets.ts: blue, green,
+amber, rose, grey), as the renderer draws it at rest: the same dots and colours, on each
+background (transparent, black, white, grey), a folder per frame and one per background in it:
+<png>/<frame>/<background>/<preset>.png, with --png defaulting to the folder of --out. Plus
+black.png: black dots like ink, where the picture is dark (its light inverted, inside the
+silhouette), for light backgrounds (not on black). --dots picks the dot sizes (default 1,2): 1 px dots, and 2x2 px dots as the
+renderer's `dot: 2` draws them (same picture size, a coarser grid), as <preset>_2px.png.
+--png-scale N draws every PNG px as NxN (a bigger image, no more detail; --size adds detail).
 
 The map holds the light; the renderer turns it into an ordered (Bayer) dot pattern. Nothing is
 outlined: an edge is just where the dots stop. Before that, the tone is boosted so the dark parts
@@ -29,6 +39,7 @@ import argparse
 import base64
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable, Iterator
 
 import cv2
 import numpy as np
@@ -88,12 +99,131 @@ def pack(vals: np.ndarray) -> str:
     return base64.b64encode((v[0::2] << 4 | v[1::2]).tobytes()).decode()
 
 
+# DEFAULT_LOOK in src/phosphor.ts: what decides which dots are lit and their colour.
+LOOK = dict(gain=1.0, curve=1.0, solid=1.01, fill=1.0, rampA=2.0, rampB=3.0)
+PRESETS = Path(__file__).resolve().parent.parent / 'src' / 'presets.ts'
+
+
+def presets() -> dict[str, list[str]]:
+    """The colour presets, from src/presets.ts (one `name: ['#dim', '#mid', '#bright'],` per line)."""
+    import re
+    hexes = r"'(#[0-9a-fA-F]{6})'"
+    found = {m[0]: list(m[1:]) for m in re.findall(rf"^\s*(\w+):\s*\[{hexes},\s*{hexes},\s*{hexes}\]", PRESETS.read_text(), re.M)}
+    if not found:
+        raise ValueError(f'no presets in {PRESETS}')
+    return found
+
+
+def bayer8(h: int, w: int) -> np.ndarray:
+    """The shader's 8x8 Bayer threshold (bayer8 + 0.5/64) for every px."""
+    y, x = np.mgrid[0:h, 0:w].astype(np.float64)
+    b2 = lambda x, y: np.mod(np.floor(x) / 2 + np.floor(y) ** 2 * 0.75, 1)
+    b4 = lambda x, y: b2(x / 2, y / 2) * 0.25 + b2(x, y)
+    return b4(x / 2, y / 2) * 0.25 + b2(x, y) + 0.5 / 64
+
+
+def sample(tex: np.ndarray, dot: int) -> np.ndarray:
+    """The map as the shader reads it with dots of `dot` px: at each dot's centre, linearly filtered
+    (clamped at the edges). For 1, the px itself; for 2, the average of the 2x2 px under the dot."""
+    if dot == 1:
+        return tex
+    H, W = tex.shape
+
+    def axis(n, size):
+        x = (np.arange(n) + 0.5) * dot - 0.5   # the centre, in texel index space
+        i0 = np.floor(x).astype(int)
+        f = x - i0
+        return np.clip(i0, 0, size - 1), np.clip(i0 + 1, 0, size - 1), f
+    y0, y1, fy = axis(-(-H // dot), H)
+    x0, x1, fx = axis(-(-W // dot), W)
+    top = tex[y0][:, x0] * (1 - fx) + tex[y0][:, x1] * fx
+    bot = tex[y1][:, x0] * (1 - fx) + tex[y1][:, x1] * fx
+    return top * (1 - fy)[:, None] + bot * fy[:, None]
+
+
+def render(vals: np.ndarray, colors: list[str], L: dict | None = None, dot: int = 1) -> Image.Image:
+    """A frame (0..15) as the renderer draws it at rest (no breath, the drifting light at its mean):
+    RGBA, the dots in their colours on transparent, at the map's size. dot: dot size, px.
+    Full light is solid, as the renderer draws it with look.full = 1. By default it leaves 1 dot in
+    64 dark there, which the drifting light keeps filling in, so it reads as solid in the animation;
+    a still would show it as a grid of pinholes."""
+    L = {**LOOK, **(L or {})}
+    H0, W0 = vals.shape
+    b = sample((vals.astype(np.float64) * 17).round() / 255, dot)  # as the texture holds it
+    H, W = b.shape
+    v = b ** L['curve'] * L['gain']
+    lit = (b >= 0.02) & ((b >= 1 - 1e-6) | (v >= L['solid']) | (v / L['solid'] * L['fill'] > bayer8(H, W)))
+    pal = [np.array([int(c[i:i + 2], 16) for i in (1, 3, 5)], np.float64) / 255 for c in colors]
+
+    def smooth(e0, e1, x):
+        t = np.clip((x - e0) / (e1 - e0), 0, 1)
+        return t * t * (3 - 2 * t)
+    lo = pal[0] + (pal[1] - pal[0]) * smooth(0.2, L['rampA'], v)[..., None]
+    hi = pal[1] + (pal[2] - pal[1]) * smooth(L['rampA'], L['rampB'], v)[..., None]
+    col = np.where((v < L['rampA'])[..., None], lo, hi)
+    out = np.zeros((H, W, 4), np.uint8)
+    out[..., :3] = (col * 255).round().astype(np.uint8)
+    out[..., 3] = lit * 255
+    out[~lit, :3] = 0
+    img = Image.fromarray(out, 'RGBA')
+    return img.resize((W * dot, H * dot), Image.NEAREST).crop((0, 0, W0, H0)) if dot > 1 else img
+
+
+BACKGROUNDS = {'none': None, 'black': '#000000', 'white': '#ffffff', 'grey': '#808080'}
+INK = ['#000000'] * 3  # the black version: dots where the picture is dark
+
+
+def ink(vals: np.ndarray, body: np.ndarray) -> np.ndarray:
+    """A frame's light inverted inside the silhouette (dark is dense), for black dots on light."""
+    return np.where(body, 15 - vals, 0).astype(np.uint8)
+
+
+def pngs(m: dict, dots: Iterable[int] = (1, 2), backgrounds: Iterable[str] = tuple(BACKGROUNDS),
+         colours: Iterable[str] | None = None, scale: int = 1) -> Iterator[tuple[str, Image.Image]]:
+    """Every frame of a built map in each preset (`colours`: preset names, plus 'black' for the ink
+    version; default all), dot size and background, as (path, image): <frame>/<background>/<preset>.png
+    (1 px dots), .../<preset>_<N>px.png (N px dots). Background 'none' (folder `transparent`) keeps
+    the alpha; black ink is not drawn on black. scale: each px as scale x scale px (no more detail)."""
+    table = {**presets(), 'black': INK}
+    names = list(table) if colours is None else [c for c in colours if c in table]
+    for name, vals in m['maps'].items():
+        for preset in names:
+            colors = table[preset]
+            for d in dots:
+                img = render(ink(vals, m['bodymask']) if colors is INK else vals, colors, dot=d)
+                if scale > 1:
+                    img = img.resize((img.width * scale, img.height * scale), Image.NEAREST)
+                for bg in backgrounds:
+                    col = BACKGROUNDS[bg]
+                    if colors is INK and col == '#000000':
+                        continue
+                    path = f'{name}/{"transparent" if col is None else bg}/{preset}{"" if d == 1 else f"_{d}px"}.png'
+                    if col is None:
+                        yield path, img
+                    else:
+                        flat = Image.new('RGBA', img.size, col)
+                        flat.alpha_composite(img)
+                        yield path, flat.convert('RGB')
+
+
+def write_pngs(m: dict, folder: Path, dots: Iterable[int] = (1, 2),
+               backgrounds: Iterable[str] = tuple(BACKGROUNDS), scale: int = 1) -> list[Path]:
+    """pngs(), saved under folder."""
+    out = []
+    for path, img in pngs(m, dots, backgrounds, scale=scale):
+        f = folder / path
+        f.parent.mkdir(parents=True, exist_ok=True)
+        img.save(f)
+        out.append(f)
+    return out
+
+
 def build(shaded: np.ndarray, frames: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
           idle: str | None = None, eye: tuple[int, int, int, int] | None = None, T: Tone | None = None) -> dict:
     """shaded: the light, 0..1, HxW. frames: name -> (line art on black, alpha), 0..1, the same
     size; the idle frame is `idle` (default: the first). eye: the area (x0, x1, y0, y1) where the
     shading's response to the line art is measured (default: around everything the frames change).
-    Returns the map as a dict (see to_ts) plus `stats`."""
+    Returns the map as a dict (see to_ts) plus `stats`, and `maps`: every frame in full (0..15)."""
     T = T or Tone()
     H, W = shaded.shape
     frames = frames or {}
@@ -126,20 +256,21 @@ def build(shaded: np.ndarray, frames: dict[str, tuple[np.ndarray, np.ndarray]] |
         ey, ex = slice(eye[2], eye[3]), slice(eye[0], eye[1])
         a, b = line0[ey, ex].ravel(), shaded[ey, ex].ravel()
         gain = float(np.cov(a, b)[0, 1] / a.var()) if a.var() > 0 else 0.0
-    patches = {}
+    patches, maps = {}, {idle: base}
     for n, (delta, mv) in moved.items():
         soft = unit(as_img(mv.astype(np.float32)).filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(2)))
         vals = tone(np.clip(shaded + gain * delta * soft, 0, 1), mask, wp, T)
         # keep the tone's own changes (it works locally) to a margin around the patch
         near = unit(as_img(mv.astype(np.float32)).filter(ImageFilter.MaxFilter(T.patch_margin * 2 + 1))) > 0.5
         vals = np.where(near, vals, base)
+        maps[n] = vals
         ys, xs = np.nonzero(vals != base)
         if not len(ys):
             continue
         x0, y0, x1, y1 = xs.min(), ys.min(), xs.max() + 1, ys.max() + 1
         patches[n] = {'x': int(x0), 'y': int(y0), 'w': int(x1 - x0), 'h': int(y1 - y0), 'data': pack(vals[y0:y1, x0:x1])}
     return {'w': W, 'h': H, 'idle': idle, 'data': pack(base),
-            'body': base64.b64encode(np.packbits(body.ravel())).decode(), 'frames': patches,
+            'body': base64.b64encode(np.packbits(body.ravel())).decode(), 'frames': patches, 'maps': maps, 'bodymask': body,
             'stats': {'lit': float((base > 0).mean()), 'mean': float(base[base > 0].mean() / 15) if (base > 0).any() else 0.0,
                       'gain': gain}}
 
@@ -168,6 +299,12 @@ def main() -> None:
     ap.add_argument('--eye', help='x0,x1,y0,y1: where the shading follows the line art (default: auto)')
     ap.add_argument('--out', type=Path, default=Path('map.ts'))
     ap.add_argument('--export', default='LEDMAP', help='name of the exported constant')
+    ap.add_argument('--png', type=Path, help='folder for the PNGs, a subfolder per frame (default: the folder of --out)')
+    ap.add_argument('--no-png', action='store_true', help='write no PNGs')
+    ap.add_argument('--dots', default='1,2', help='dot sizes for the PNGs, px (default 1,2)')
+    ap.add_argument('--png-scale', type=int, default=1, help='draw each PNG px as NxN (bigger, no more detail; default 1)')
+    ap.add_argument('--backgrounds', default=','.join(BACKGROUNDS),
+                    help=f'PNG backgrounds, of {",".join(BACKGROUNDS)} (none: transparent; default all)')
     args = ap.parse_args()
     W, H = (int(v) for v in args.size.lower().split('x'))
     shaded = unit(Image.open(args.shaded).convert('L').resize((W, H), Image.LANCZOS))
@@ -179,12 +316,23 @@ def main() -> None:
         frames[name] = (unit(im.convert('L')) * a, a)
     eye = tuple(int(v) for v in args.eye.split(',')) if args.eye else None
     m = build(shaded, frames, args.idle, eye)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(to_ts(m, args.export, HEADER))
     s = m['stats']
     print(f'{args.out}: {W}x{H}, {args.out.stat().st_size} bytes, {s["lit"]:.0%} lit, mean {s["mean"]:.2f}'
           + (f'; line-art gain {s["gain"]:.2f}' if m['frames'] else ''))
     for n, p in m['frames'].items():
         print(f'  {n}: patch {p["w"]}x{p["h"]} at {p["x"]},{p["y"]}')
+    if not args.no_png:
+        folder = args.png or args.out.parent
+        dots = tuple(sorted({int(k) for k in args.dots.split(',')}))
+        bgs = tuple(b.strip() for b in args.backgrounds.split(','))
+        bad = [b for b in bgs if b not in BACKGROUNDS]
+        if bad:
+            ap.error(f'unknown background {", ".join(bad)}: use {", ".join(BACKGROUNDS)}')
+        pngs = write_pngs(m, folder, dots, bgs, max(1, args.png_scale))
+        print(f'{folder}: {len(pngs)} PNGs, a folder per frame and background '
+              f'({len(presets())} presets and black ink x {len(dots)} dot sizes x {len(bgs)} backgrounds)')
 
 
 if __name__ == '__main__':

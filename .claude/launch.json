@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "phosphor-web", "runtimeExecutable": "python3", "runtimeArgs": ["tools/phosphor_web.py"], "port": 8340 }
+  ]
+}

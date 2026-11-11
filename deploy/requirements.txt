@@ -1,0 +1,4 @@
+# The web interface's Python side (tools/), pinned to what it was tested with.
+numpy==2.5.4
+pillow==13.0.0
+opencv-python-headless==5.0.0.93

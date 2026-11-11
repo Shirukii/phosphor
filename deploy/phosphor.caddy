@@ -1,0 +1,19 @@
+# Caddy site for the web interface: setup.sh appends it to /etc/caddy/Caddyfile.
+phosphor.laika.fm {
+	encode zstd gzip
+	request_body {
+		max_size 24MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		# the page's own script only; its styles are inline; pictures are data: and blob: urls
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:8340
+}

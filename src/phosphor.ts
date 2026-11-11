@@ -8,23 +8,30 @@
 // the brightest values as solid lines; it is off by default.) A soft light field drifts across it,
 // so dots flip on and off locally every frame; while thinking, the pattern itself also scrolls a
 // few steps a second. Dots take three colours (dim, mid, bright), shading from dim toward mid (and
-// near-white, if the ramp is set low enough) as the light rises. Modes change how it moves, never
-// how lit it is. At startup the grid resolves from a few giant blocks down to single dots.
+// near-white, if the ramp is set low enough) as the light rises. At startup the grid resolves from
+// a few giant blocks down to single dots.
 //
-// Behind the figure, a burst of thin dotted rays from `center` turns slowly, in a dimmer version of
-// the dim colour; it reaches further in a conversation and turns faster while thinking. It stays
-// out of the figure's silhouette (`body` in the map, the texture's alpha).
-// Particles drift off the back and top of the figure (a second, cheap draw of points): they leave
-// as larger dots, shrink to single ones and flicker out; modes change their rate and speed, and a
-// mic level adds to the rate. It breathes: on each breath in, the head tilts back a little about
-// `pivot` (the top of the neck) and the shoulders rise; the far ends (hair) follow a moment later.
-// Asleep (sleep()), over a few seconds: the head droops forward, breathing slows and deepens, and
-// the light and the particles calm down.
+// Out of the box it breathes and blinks, and nothing else is drawn: on each breath in, the head
+// tilts back a little about `pivot` (the top of the neck) and the shoulders rise; the far ends
+// (hair) follow a moment later. If the map has a `blink` frame, it blinks every few seconds.
+// Asleep (sleep()), over a few seconds: the eyes close, the head droops forward, breathing slows
+// and deepens, and the light calms down.
+//
+// Opt-in extras (all off by default):
+// - look.burst: behind the figure, a burst of thin dotted rays from `center` turns slowly, in a
+//   dimmer version of the dim colour. It stays out of the figure's silhouette (`body` in the map).
+// - look.particles: particles drift off the figure (a second, cheap draw of points): off its left
+//   or right side and top, or off its whole outline (`particlesFrom`). They leave as larger dots,
+//   shrink to single ones and flicker out.
+// - moods (set()): idle, listening, thinking, speaking change how it moves (and the extras), never
+//   how lit it is; a mic level (level()) adds particles while listening.
 //
 // Tuned for slow GPUs (a Mali-T720 holds 30 fps at 340x280): highp for coordinates, no sin() with
 // large arguments, ~30 fps.
 
 /** The brightness map tools/phosphor_map.py writes. */
+import { PRESETS as presets } from './presets';
+
 export interface PhosphorMap {
   w: number;
   h: number;
@@ -41,6 +48,8 @@ export interface Look {
   curve: number;  // gamma on the light (below 1 lifts the mid-tones)
   solid: number;  // brightness from which a dot is always lit (lines); below it, dithered
   fill: number;   // density of the dithered fills just below `solid` (0..1)
+  full: number;   // map light (0..1) from which a dot is always lit, whatever the drift: 1 makes full
+                  // light solid (as in the PNGs) instead of a flickering grid of pinholes; above 1: off
   rampA: number;  // brightness where the dim colour has turned into the mid colour
   rampB: number;  // brightness where the mid colour has turned into the bright one
   drift: number;  // strength of the drifting light field (0 = still)
@@ -54,11 +63,19 @@ export interface Look {
   sleepBreath: number; // asleep: breaths this much slower (and this much deeper), as a fraction
   sleepCalm: number; // asleep: the light drift, particles and burst drop by this fraction
   burst: number; // strength of the ray burst behind the figure (0 = none)
+  blinkEvery: number; // mean seconds between blinks (0 = never); needs a `blink` frame in the map
+  blinkMs: number; // how long the eyes stay shut
 }
 
-export const DEFAULT_LOOK: Look = { cell: 1, gap: 0, gain: 1, curve: 1, solid: 1.01, fill: 1, rampA: 2, rampB: 3, drift: 0.2, driftSize: 28,
-  particles: 16, particleSize: 2, breathTilt: 1.5, breathRise: 2.5, breathS: 4.8,
-  sleepDroop: 3, sleepBreath: 0.45, sleepCalm: 0.8, burst: 1 };
+export const DEFAULT_LOOK: Look = { cell: 1, gap: 0, gain: 1, curve: 1, solid: 1.01, fill: 1, full: 1.01, rampA: 2, rampB: 3, drift: 0.2, driftSize: 28,
+  particles: 0, particleSize: 2, breathTilt: 1.5, breathRise: 2.5, breathS: 4.8,
+  sleepDroop: 3, sleepBreath: 0.45, sleepCalm: 0.8, burst: 0, blinkEvery: 4.5, blinkMs: 140 };
+
+/** Dot colour presets (dim, mid, bright), shared with tools/phosphor_map.py's PNG export. */
+export const PRESETS: Record<Preset, [string, string, string]> = presets;
+export type Preset = keyof typeof presets;
+
+export type ParticlesFrom = 'left' | 'right' | 'all';
 
 export interface Motion { scroll: number; drift: number; reach: number; spin: number; emit: number; wind: number; breath: number }
 export type Mode = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -80,14 +97,25 @@ export interface PhosphorOptions {
   height?: number;
   /** Device px per display px, read when the canvas is sized and every frame (default: devicePixelRatio, 1..2). */
   pixelRatio?: () => number;
-  /** Dim, mid and bright dot colours, as CSS colours (any the browser parses). Read again by palette(). */
-  colors?: () => [string, string, string];
+  /** Dot colours: a preset's name (default 'blue'), or dim, mid and bright as CSS colours (any the
+   *  browser parses), read again by palette(). */
+  colors?: Preset | (() => [string, string, string]);
+  /** The map frame that shows the eyes shut, for blinking and sleep (default 'blink'). */
+  blinkFrame?: string;
+  /** Play the startup reveal (the grid resolving from giant blocks) on load (default true). */
+  reveal?: boolean;
   /** Map px: the top of the neck, which the head tilts about (default: middle, 80% down). */
   pivot?: [number, number];
   /** Map px: the middle of the head, the ray burst's centre (default: middle, 45% down). */
   center?: [number, number];
-  /** Which way the figure faces: particles leave from (and drift toward) the back. Default 'left'. */
-  facing?: 'left' | 'right';
+  /** Dot size in display (CSS) px, at the same picture size: 2 draws 2x2 px dots, half as many each
+   *  way, each lit from the map at its centre (for 2: the average of the 4 map px it covers); a
+   *  coarser, chunkier LED grid. Overrides look.cell (device px). Default: look.cell. */
+  dot?: number;
+  /** Where particles leave from (when look.particles is on): the figure's right side and top
+   *  ('right', the default: the back of a figure facing left), its left side and top, or its whole
+   *  outline ('all'), drifting outward. */
+  particlesFrom?: ParticlesFrom;
   /** Map px: particles leave only above this row (default: 78% down). */
   emitMaxY?: number;
   look?: Partial<Look>;
@@ -99,10 +127,9 @@ export interface PhosphorOptions {
 const MAX_PARTS = 256;
 const FADE_MS = 350; // a change of frame crossfades over this by default
 const LAG_S = 0.35;  // how far behind the far ends (hair) follow, seconds
-const PART = 7;      // floats per particle: x, y, vx, vy, age, life, seed
+const PART = 9;      // floats per particle: x, y, vx, vy, age, life, seed, and the wind's direction x, y
 const REVEAL_FROM = 64, REVEAL_S = 3.2; // startup: dot size shrinks from this (device px), over this long
 const RAYS = 48;     // rays in the burst
-const COLORS: [string, string, string] = ['#24324d', '#6f93e8', '#eef3ff'];
 
 const VS = `
 attribute vec2 a_pos;
@@ -113,7 +140,7 @@ precision highp float; // Mali runs mediump as fp16: too coarse for the coordina
 uniform sampler2D u_map, u_prev; // the frame drawn, and the one it is fading from
 uniform float u_mix;            // how far that fade is, 0..1 (1: u_map only)
 uniform vec2 u_res, u_size;
-uniform float u_pr, u_cell, u_gap, u_time, u_gain, u_curve, u_phase, u_drift, u_dsize, u_dt, u_solid, u_fill;
+uniform float u_pr, u_cell, u_gap, u_time, u_gain, u_curve, u_phase, u_drift, u_dsize, u_dt, u_solid, u_fill, u_full;
 uniform vec2 u_breath;         // the breath, 0..1: now, and LAG_S ago (for the far ends)
 uniform vec3 u_pose;           // head tilt at a full breath (radians), shoulder rise (px), head droop (radians)
 uniform vec2 u_neck;           // the point the head tilts about, px
@@ -168,8 +195,9 @@ void main() {
 
   float thr = bayer8(mod(c + u_phase, 8.0)) + 0.5 / 64.0;
   // lines are solid; fills below u_solid are dithered, sparser the fainter they are
-  bool lit = b >= 0.02 && (v >= u_solid || v / u_solid * u_fill > thr);
+  bool lit = b >= 0.02 && (b >= u_full - 0.001 || v >= u_solid || v / u_solid * u_fill > thr);
   if (!lit) {
+    if (u_bstr <= 0.0) { gl_FragColor = vec4(0.0); return; } // no burst: nothing behind
     // behind: a burst of thin dotted rays, in a dimmer dim colour, starting a little out from its
     // centre. Each ray fades by how far along it is to the edge in its own direction, so the burst
     // fills the panel evenly although its centre is off centre.
@@ -250,14 +278,29 @@ function withBody(map: Uint8Array, body: string | undefined): Uint8Array {
   return out;
 }
 
-/** Where particles leave: the back (the last lit px per row, from the front) and the top (topmost
- *  per column) of the figure, above maxY. The top only from the crown back, so particles drifting
- *  back and up never cross the head. back: +1 when the back is to the right (facing left), -1 when
- *  to the left. Triples of x, y (map px) and a flag: 1 for the top edge. */
-function emitters(map: Uint8Array, w: number, maxY: number, back: 1 | -1): number[] {
+/** Where particles leave, as x, y (map px), then the way they head (x, y) and a kind: 0 a side,
+ *  1 the top, 2 the outline. All above maxY.
+ *  'left' / 'right': the outermost lit px per row on that side, and the top (topmost per column),
+ *  from the crown toward that side only, so particles drifting that way and up never cross the head.
+ *  'all': every px of the silhouette's outline, heading straight out from it. */
+function emitters(map: Uint8Array, body: Uint8Array, w: number, maxY: number, from: ParticlesFrom): number[] {
   const out: number[] = [];
-  const xs = Array.from({ length: w }, (_, i) => back > 0 ? w - 1 - i : i); // back to front
-  for (let y = 0; y < maxY; y++) for (const x of xs) if (map[y * w + x]) { out.push(x, y, 0); break; }
+  if (from === 'all') {
+    const h = Math.min(maxY, body.length / w), inside = (x: number, y: number): boolean =>
+      x < 0 || x >= w || y >= h ? true : y < 0 ? false : body[y * w + x] > 0; // past the sides and the bottom: still figure
+    const R = 3;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (!inside(x, y) || (inside(x - 1, y) && inside(x + 1, y) && inside(x, y - 1) && inside(x, y + 1))) continue;
+      let nx = 0, ny = 0; // outward: toward the empty px around it
+      for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) if (!inside(x + dx, y + dy)) { nx += dx; ny += dy; }
+      const n = Math.hypot(nx, ny);
+      if (n > 0) out.push(x, y, nx / n, ny / n, 2);
+    }
+    return out;
+  }
+  const back = from === 'right' ? 1 : -1;
+  const xs = Array.from({ length: w }, (_, i) => back > 0 ? w - 1 - i : i); // outermost first
+  for (let y = 0; y < maxY; y++) for (const x of xs) if (map[y * w + x]) { out.push(x, y, back, 0, 0); break; }
   const top: number[] = [];
   for (let x = 0; x < w; x++) {
     let t = -1;
@@ -267,7 +310,7 @@ function emitters(map: Uint8Array, w: number, maxY: number, back: 1 | -1): numbe
   let crown = -1;
   top.forEach((t, x) => { if (t >= 0 && (crown < 0 || t < top[crown])) crown = x; });
   if (crown < 0) return out;
-  for (let x = crown; x >= 0 && x < w; x += back) if (top[x] >= 0) out.push(x, top[x], 1);
+  for (let x = crown; x >= 0 && x < w; x += back) if (top[x] >= 0) out.push(x, top[x], back, 0, 1);
   return out;
 }
 
@@ -281,9 +324,13 @@ export class Phosphor {
   private h: number;
   private ratio: () => number;
   private colors: () => [string, string, string];
+  private blinkFrame: string;
+  private blinkAt = performance.now() + REVEAL_S * 1000; // the next blink (ms)
+  private blinkEnd = 0;  // while blinking: when the eyes open again (ms)
   private pivot: [number, number];
   private center: [number, number];
-  private back: 1 | -1;
+  private from: ParticlesFrom;
+  private dotPx: number | null;
   private emitMaxY: number;
   private gl: WebGLRenderingContext | null = null;
   private u: Record<string, WebGLUniformLocation | null> = {};
@@ -328,10 +375,14 @@ export class Phosphor {
     this.w = o.width ?? M.w;
     this.h = o.height ?? M.h;
     this.ratio = o.pixelRatio ?? ((): number => Math.min(2, Math.max(1, window.devicePixelRatio || 1)));
-    this.colors = o.colors ?? ((): [string, string, string] => COLORS);
+    const c = o.colors ?? 'blue';
+    this.colors = typeof c === 'function' ? c : (): [string, string, string] => PRESETS[c] ?? PRESETS.blue;
+    this.blinkFrame = o.blinkFrame ?? 'blink';
+    if (o.reveal === false) { this.t0 -= REVEAL_S * 1000; this.blinkAt = performance.now() + 1500; }
     this.pivot = o.pivot ?? [M.w / 2, M.h * 0.8];
     this.center = o.center ?? [M.w / 2, M.h * 0.45];
-    this.back = o.facing === 'right' ? -1 : 1;
+    this.from = o.particlesFrom ?? 'right';
+    this.dotPx = o.dot ?? null;
     this.emitMaxY = o.emitMaxY ?? Math.round(M.h * 0.78);
     this.look = { ...DEFAULT_LOOK, ...o.look };
     this.motion = { ...DEFAULT_MOTION };
@@ -340,8 +391,7 @@ export class Phosphor {
     this.shown = M.idle;
     this.canvas = document.createElement('canvas');
     this.canvas.className = o.className ?? 'phosphor';
-    this.canvas.style.width = this.w + 'px';
-    this.canvas.style.height = this.h + 'px';
+    this.size();
     this.canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); this.stop(); this.gl = null; });
     this.canvas.addEventListener('webglcontextrestored', () => { if (this.init()) this.start(); });
     document.addEventListener('visibilitychange', this.onVisibility);
@@ -366,9 +416,7 @@ export class Phosphor {
   reveal(): void { this.t0 = performance.now(); }
 
   private init(): boolean {
-    const r = this.ratio();
-    this.canvas.width = Math.round(this.w * r);
-    this.canvas.height = Math.round(this.h * r);
+    this.size();
     const opts = { alpha: true, premultipliedAlpha: true, antialias: false, depth: false };
     const gl = this.canvas.getContext('webgl', opts) as WebGLRenderingContext | null;
     if (!gl) return false;
@@ -390,7 +438,7 @@ export class Phosphor {
     };
     const p = this.prog = link(VS, FS, 'a_pos');
     for (const n of ['u_map', 'u_prev', 'u_mix', 'u_res', 'u_size', 'u_pr', 'u_cell', 'u_gap', 'u_time', 'u_gain', 'u_curve', 'u_phase',
-      'u_drift', 'u_dsize', 'u_dt', 'u_solid', 'u_fill', 'u_ramp', 'u_pal', 'u_breath', 'u_pose', 'u_neck', 'u_burst', 'u_bstr']) this.u[n] = gl.getUniformLocation(p, n);
+      'u_drift', 'u_dsize', 'u_dt', 'u_solid', 'u_fill', 'u_full', 'u_ramp', 'u_pal', 'u_breath', 'u_pose', 'u_neck', 'u_burst', 'u_bstr']) this.u[n] = gl.getUniformLocation(p, n);
     const pp = this.pprog = link(PVS, PFS, 'a_p');
     for (const n of ['u_size', 'u_pr', 'u_col']) this.pu[n] = gl.getUniformLocation(pp, n);
     gl.enableVertexAttribArray(0);
@@ -416,14 +464,38 @@ export class Phosphor {
     const plain = decodeMaps(this.M);
     const map = plain.get(this.M.idle)!;
     this.maps = new Map([...plain].map(([n, m]) => [n, withBody(m, this.M.body)]));
-    this.emit = emitters(map, this.M.w, this.emitMaxY, this.back); // assumes frames differ only in small patches
     this.map = map;
+    this.emit = this.emitters();
     this.gl = gl;
     this.upload(0, this.shown);
     this.upload(1, this.shown);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     this.palette();
     return true;
+  }
+
+  /** Size the canvas: CSS px and its backing store. */
+  private size(): void {
+    const r = this.ratio();
+    this.canvas.style.width = this.w + 'px';
+    this.canvas.style.height = this.h + 'px';
+    this.canvas.width = Math.round(this.w * r);
+    this.canvas.height = Math.round(this.h * r);
+    this.gl?.viewport(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  /** Dot size, display px (null: look.cell device px). Can be changed live. */
+  get dot(): number | null { return this.dotPx; }
+  set dot(d: number | null) { this.dotPx = d && d > 0 ? d : null; }
+
+  /** Where particles leave from: 'left', 'right' or 'all' (the whole outline). Can be changed live. */
+  get particlesFrom(): ParticlesFrom { return this.from; }
+  set particlesFrom(f: ParticlesFrom) { this.from = f; if (this.map) this.emit = this.emitters(); }
+
+  private emitters(): number[] { // from idle: frames differ only in small patches
+    const lit = this.maps.get(this.M.idle)!, body = new Uint8Array(lit.length / 2);
+    for (let i = 0; i < body.length; i++) body[i] = lit[i * 2 + 1];
+    return emitters(this.map!, body, this.M.w, this.emitMaxY, this.from);
   }
 
   /** The frame names this map holds. */
@@ -464,8 +536,13 @@ export class Phosphor {
     if (this.mode !== 'listening') this.levelTarget = 0;
   }
 
-  /** Asleep or not: eases into it over a few seconds, and out of it faster. */
-  sleep(on: boolean): void { this.sleepTarget = on ? 1 : 0; }
+  /** Asleep or not: eases into it over a second or two (closing the eyes), and out of it faster. */
+  sleep(on: boolean): void {
+    this.sleepTarget = on ? 1 : 0;
+    if (!this.maps.has(this.blinkFrame)) return;
+    if (on && this.shown === this.M.idle) this.show(this.blinkFrame, 600);
+    else if (!on && this.shown === this.blinkFrame) { this.blinkEnd = 0; this.show(this.M.idle, 400); }
+  }
 
   /** Mic level while listening, dBFS (-55..-15 maps to 0..1): more particles. */
   level(db: number): void {
@@ -489,39 +566,61 @@ export class Phosphor {
     }
     this.levelNow += (this.levelTarget - this.levelNow) * (1 - Math.exp(-dt * 12));
     this.phase = (this.phase + dt * this.cur.scroll) % 8; // integrated, so a speed change never jumps
-    this.sleepNow += (this.sleepTarget - this.sleepNow) * (1 - Math.exp(-dt / (this.sleepTarget > this.sleepNow ? 2.5 : 0.6)));
+    this.sleepNow += (this.sleepTarget - this.sleepNow) * (1 - Math.exp(-dt / (this.sleepTarget > this.sleepNow ? 1.2 : 0.6)));
     const z = this.sleepNow, L = this.look;
     this.driftT = (this.driftT + dt * this.cur.drift * (1 - L.sleepCalm * z)) % 1000;
     this.breathT = (this.breathT + dt * this.cur.breath * (1 - L.sleepBreath * z) / L.breathS) % 1;
     this.burstTurn = (this.burstTurn + dt * this.cur.spin * (1 - L.sleepCalm * z)) % 1;
+    this.blink(now);
     const t = (now - this.t0) / 1000;
     this.particles(dt, t);
     this.draw(t);
   }
 
+  /** Blink now and then: only from idle and awake, so a frame shown by show() is left alone. */
+  private blink(now: number): void {
+    const L = this.look, B = this.blinkFrame;
+    if (this.blinkEnd) {
+      if (now < this.blinkEnd) return;
+      this.blinkEnd = 0;
+      if (this.shown === B && !this.sleepTarget) this.show(this.M.idle, 60);
+    }
+    if (L.blinkEvery <= 0 || this.sleepTarget || !this.maps.has(B) || now < this.blinkAt) return;
+    this.blinkAt = now + L.blinkMs + L.blinkEvery * 1000 * (0.4 + Math.random() * 1.2);
+    if (this.shown !== this.M.idle) return;
+    this.show(B, 0);
+    this.blinkEnd = now + L.blinkMs;
+  }
+
   /** Spawn, move and retire the particles, then write their points (shrinking, then flickering out). */
   private particles(dt: number, t: number): void {
-    const P = this.parts, m = this.cur, L = this.look, E = this.emit, M = this.M, back = this.back;
+    const P = this.parts, m = this.cur, L = this.look, E = this.emit, M = this.M;
     const sx = this.w / M.w, sy = this.h / M.h;
     if (t > REVEAL_S && E.length) this.emitAcc += L.particles * m.emit * (1 + this.levelNow * 2) * (1 - L.sleepCalm * this.sleepNow) * dt;
     while (this.emitAcc >= 1) {
       this.emitAcc -= 1;
       if (this.nParts >= MAX_PARTS) continue;
-      const e = Math.floor(Math.random() * (E.length / 3)) * 3, o = this.nParts++ * PART;
-      const top = E[e + 2] === 1;
+      const e = Math.floor(Math.random() * (E.length / 5)) * 5, o = this.nParts++ * PART;
+      const nx = E[e + 2], ny = E[e + 3], kind = E[e + 4], speed = 5 + Math.random() * 10;
       P[o] = E[e] * sx; P[o + 1] = E[e + 1] * sy;
-      P[o + 2] = back * (5 + Math.random() * 10);                             // drifting back, away from the face
-      P[o + 3] = top ? -(3 + Math.random() * 5) : -3 + Math.random() * 4;   // and rising a little
+      if (kind === 2) {                                   // the outline: straight out, rising a little
+        P[o + 2] = nx * speed; P[o + 3] = ny * speed - 2 + Math.random() * 2;
+      } else {                                            // a side, away from the face; the top rises more
+        P[o + 2] = nx * speed;
+        P[o + 3] = kind === 1 ? -(3 + Math.random() * 5) : -3 + Math.random() * 4;
+      }
       P[o + 4] = 0; P[o + 5] = 2.5 + Math.random() * 2.5; P[o + 6] = Math.random() * 6.283;
+      P[o + 7] = nx; P[o + 8] = ny;                      // the wind carries them on that way
     }
     let n = 0;
     for (let i = 0; i < this.nParts; i++) {
       const o = i * PART;
       P[o + 4] += dt;
-      P[o + 2] += back * 3 * dt;                                            // the wind picks them up
+      P[o + 2] += P[o + 7] * 3 * dt;                                        // the wind picks them up
+      P[o + 3] += P[o + 8] * 3 * dt;
       P[o] += P[o + 2] * m.wind * dt;
       P[o + 1] += (P[o + 3] + Math.sin(P[o + 4] * 1.7 + P[o + 6]) * 4) * m.wind * dt;
-      if (P[o + 4] > P[o + 5] || P[o] > this.w || P[o] < -4 || P[o + 1] < -4) { // gone: swap in the last one
+      if (P[o + 4] > P[o + 5] || P[o] > this.w || P[o] < -4 || P[o + 1] < -4 || P[o + 1] > this.h) { // gone: swap in the last one
         P.copyWithin(o, (this.nParts - 1) * PART, this.nParts * PART);
         this.nParts--; i--;
         continue;
@@ -541,12 +640,13 @@ export class Phosphor {
     const gl = this.gl;
     if (!gl) return;
     const u = this.u, m = this.cur, L = this.look, M = this.M, pr = this.ratio();
+    const base = this.dotPx ? Math.max(1, Math.round(this.dotPx * pr)) : L.cell; // device px per dot
     gl.useProgram(this.prog);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     // startup reveal: the dot size steps down from giant blocks, easing out
     const e = Math.min(1, t / REVEAL_S), ease = 1 - Math.pow(1 - e, 3);
-    const cell = e >= 1 ? L.cell : Math.max(L.cell, Math.round(REVEAL_FROM + (L.cell - REVEAL_FROM) * ease));
+    const cell = e >= 1 ? base : Math.max(base, Math.round(REVEAL_FROM + (base - REVEAL_FROM) * ease));
     gl.uniform1i(u.u_map, this.front);
     gl.uniform1i(u.u_prev, this.front ^ 1);
     gl.uniform1f(u.u_mix, Math.min(1, (performance.now() - this.fadeT0) / this.fadeMs));
@@ -562,6 +662,7 @@ export class Phosphor {
     gl.uniform1f(u.u_drift, L.drift);
     gl.uniform1f(u.u_solid, L.solid);
     gl.uniform1f(u.u_fill, L.fill);
+    gl.uniform1f(u.u_full, L.full);
     gl.uniform1f(u.u_dsize, L.driftSize);
     gl.uniform1f(u.u_dt, this.driftT);
     gl.uniform2f(u.u_ramp, L.rampA, L.rampB);

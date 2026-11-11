@@ -5,7 +5,16 @@
   "license": "GPL-3.0-or-later",
   "type": "module",
   "main": "src/phosphor.ts",
-  "exports": { ".": "./src/phosphor.ts" },
-  "scripts": { "typecheck": "tsc --noEmit -p ." },
-  "devDependencies": { "typescript": "~5.9.3" }
+  "exports": {
+    ".": "./src/phosphor.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "build:web": "esbuild web/app.ts --bundle --format=esm --target=es2017 --sourcemap --outfile=web/dist/app.js",
+    "web": "npm run build:web && python3 tools/phosphor_web.py"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0",
+    "typescript": "~5.9.3"
+  }
 }

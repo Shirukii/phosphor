@@ -1,0 +1,46 @@
+# /etc/systemd/system/phosphor.service: the web interface, public mode, behind Caddy.
+# setup.sh installs it. The app and its venv are owned by the deploying user and only read here.
+[Unit]
+Description=Phosphor web interface (phosphor.laika.fm)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=phosphor
+Group=phosphor
+WorkingDirectory=/opt/phosphor/app
+ExecStart=/opt/phosphor/venv/bin/python tools/phosphor_web.py --public --host 127.0.0.1 --port 8340
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=OPENCV_LOG_LEVEL=ERROR
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost 127.0.0.1
+UMask=0077
+MemoryMax=3G
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

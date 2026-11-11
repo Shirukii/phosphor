@@ -3,16 +3,23 @@
 A picture drawn as a grid of LED-like dots: an ordered (Bayer) dither in one WebGL1 fragment shader,
 from a 4-bit brightness map bundled in your JS. No image files at runtime.
 
-It is alive, not a still:
+Out of the box it is alive, not a still, and draws nothing but the figure:
 
-- a soft light field drifts across the dots, so they flip on and off locally
 - the figure breathes: the head tilts back a little about the neck, the shoulders rise, the hair follows a moment later
+- it blinks every few seconds, if the map has a `blink` frame
+- a soft light field drifts across the dots, so they flip on and off locally
 - frames (a blink, a glance) crossfade through the dither, or swap at once
-- particles drift off the back and top of the figure, shrink and flicker out
-- a slowly turning burst of dotted rays sits behind it, kept out of the silhouette
-- asleep, the head droops, breathing slows and everything calms
+- asleep, the eyes close, the head droops, breathing slows and the light calms
 - at startup the grid resolves from giant blocks down to single dots
-- moods (`idle`, `listening`, `thinking`, `speaking`) change how it moves, never how lit it is
+
+Opt-in, off unless you turn them on:
+
+- `look.burst`: a slowly turning burst of dotted rays behind the figure, kept out of the silhouette
+- `look.particles`: particles drift off the figure, shrink and flicker out; `particlesFrom` picks
+  where from: `'right'` (default) or `'left'` (that side and the top), or `'all'` (the whole outline,
+  drifting straight out)
+- moods (`idle`, `listening`, `thinking`, `speaking`, via `set()`): change how it moves and how
+  busy the extras are, never how lit it is
 
 It runs at 30 fps on a Mali-T720 (an Echo Show 5) at 340×280.
 
@@ -20,8 +27,71 @@ It runs at 30 fps on a Mali-T720 (an Echo Show 5) at 340×280.
 
 | path | what |
 |---|---|
-| `tools/phosphor_map.py` | shaded image + line-art frames → `map.ts` (the brightness map) |
+| `web/`, `tools/phosphor_web.py` | the web interface: picture in, map and PNGs out, live preview |
+| `tools/phosphor_prep.py` | cut-out, framing, and painting the eyes shut (for the web interface, or your own scripts) |
+| `tools/phosphor_map.py` | shaded image + line-art frames → `map.ts` (the brightness map) and PNGs |
 | `src/phosphor.ts` | the renderer: one class, no dependencies |
+| `src/presets.ts` | the colour presets (`blue`, `green`, `amber`, `rose`, `grey`), shared by both |
+
+## The web interface
+
+The easy way: everything below, from a picture, in the browser.
+
+```bash
+pip install numpy pillow opencv-python-headless
+```
+
+```bash
+npm install
+```
+
+```bash
+npm run web
+```
+
+Then open http://localhost:8340, and drop a picture on it or pick one from `in/`.
+
+1. **Cut out:** it guesses at once. Draw a box around the figure to redo it, and brush with
+   *keep* / *remove* to fix what it got wrong. A picture with its own transparency is used as it
+   is.
+2. **Frame:** pick the map's size (340×280 for the Echo Show 5, or any up to 2048×2048), then drag
+   and scroll with the *frame* tool to place the figure.
+3. **Eyes:** click the middle of each eye. Phosphor paints them shut for the blink (and sleep) frame.
+4. **Tone:** shadows, contrast, white point, and so on.
+5. The live preview is the renderer itself: palettes, 1px / 2px dots, sleep, solid full light, rays,
+   particles (left, right, all), blink rate, breathing. *Set neck* / *Set head* place the tilt
+   pivot and the rays' centre.
+6. **Export:** pick colours, backgrounds, dot sizes and PNG scale. You get a zip (`map.ts`, and a
+   folder of PNGs per state, then per background), also saved to `out/<name>/`.
+
+The server keeps pictures in memory while it runs, and only listens on localhost. It has no
+dependencies past the three above (`--port`, `--host` to change where it listens).
+
+### Hosting it
+
+`--public` makes it fit for the internet: it reads and writes nothing of the host's (no `in/`,
+no `out/`), refuses big uploads and decompression bombs, caps map size (1024) and PNG size,
+keeps at most 16 pictures for an hour unused, and runs two heavy jobs at a time. It holds no
+secrets and needs none.
+
+`deploy/` has what runs it at phosphor.laika.fm: a hardened systemd unit (`phosphor.service`, its
+own user, read-only), the Caddy site (`phosphor.caddy`: TLS, security headers, a 24 MB body limit),
+and two scripts to run on the server, in a checkout of this repo:
+
+```bash
+deploy/setup.sh
+```
+
+```bash
+deploy/deploy.sh
+```
+
+`setup.sh` runs once (it uses sudo): it creates the user, `/opt/phosphor`, the service and the
+Caddy site. `deploy.sh` runs after each push: pull, build, copy, restart. The site's DNS has to
+point at the server before Caddy can get its certificate.
+
+The library doesn't need any of this: `src/` (the renderer) and `tools/phosphor_map.py` work on
+their own, as in Echo Hermes.
 
 ## 1. Make a map
 
@@ -39,11 +109,22 @@ pip install numpy pillow opencv-python-headless
 ```
 
 ```bash
-python tools/phosphor_map.py shaded.png --frame idle=idle.png --frame blink=blink.png --out src/map.ts
+python tools/phosphor_map.py shaded.png --frame idle=idle.png --frame blink=blink.png --out out/me/map.ts
 ```
 
+It also writes PNGs of every frame, next to the map: a folder per frame, and in it one per
+background (`transparent`, `black`, `white`, `grey`), holding every preset at each dot size
+(`out/me/idle/transparent/blue.png`, `out/me/idle/white/rose_2px.png`, `out/me/blink/grey/amber.png`,
+...). They show the dots as the renderer draws them at rest, with full light solid (`look.full = 1`;
+by default the renderer leaves a sparse grid of pinholes there that the drifting light keeps
+filling in). Each folder but `black` also has `black.png`: black dots like ink, where the picture
+is dark (its light inverted inside the silhouette), for printing or light pages.
+
 Options: `--size WxH` (default 340x280, one value per display px), `--idle NAME`, `--eye
-x0,x1,y0,y1` (where the shading is matched to the line art; automatic by default), `--export NAME`.
+x0,x1,y0,y1` (where the shading is matched to the line art; automatic by default), `--export NAME`,
+`--png DIR` (where the frame folders go; default the folder of `--out`), `--dots 1,2` (dot sizes,
+px; default both), `--backgrounds none,black,white,grey` (default all; `none` is transparent),
+`--png-scale N` (each PNG px as N×N: bigger, no more detail; `--size` adds detail), `--no-png`.
 The tone settings (shadow lift, local contrast, adaptive equalisation in the deep shadows) are the
 `Tone` dataclass at the top of the script. From Python, `build()` takes arrays and `to_ts()` writes
 the module, for a pipeline that frames its own images.
@@ -52,28 +133,38 @@ the module, for a pipeline that frames its own images.
 
 ```ts
 import { Phosphor } from 'phosphor';
-import { LEDMAP } from './map';
+import { LEDMAP } from './out/me/map';
 
 const p = new Phosphor({
   map: LEDMAP,
   pivot: [205, 225],   // map px: top of the neck, which the head tilts about
-  center: [205, 125],  // map px: middle of the head, where the rays come from
-  colors: () => ['#24324d', '#6f93e8', '#eef3ff'], // dim, mid, bright
+  center: [205, 125],  // map px: middle of the head, where the rays (if on) come from
+  colors: 'blue',      // a preset, or () => ['#24324d', '#6f93e8', '#eef3ff'] (dim, mid, bright)
+  dot: 2,              // optional: 2x2 px dots, same picture size (a coarser LED grid)
 });
 document.body.appendChild(p.canvas);
 if (!p.load()) { /* no WebGL: show a fallback */ }
+// that's it: it breathes and blinks
 
-p.show('blink', 0);       // a frame, at once
-p.show('idle');           // crossfade back (350 ms)
+p.sleep(true);            // drift off (eyes shut)
+p.show('glance');         // another frame, crossfading (350 ms); show('idle') to go back
+p.palette();              // re-read colors() after a theme change
+
+// opt-in extras
+p.look.burst = 1;         // rays behind
+p.look.particles = 16;    // particles per second
+p.particlesFrom = 'all';  // 'left' | 'right' | 'all'
+p.dot = 1;                // dot size can change live too
+p.look.full = 1;          // full light solid, as in the PNGs (default: off)
 p.set('thinking');        // idle | listening | thinking | speaking
 p.level(-30);             // mic level while listening, dBFS: more particles
-p.sleep(true);            // drift off
-p.palette();              // re-read colors() after a theme change
 ```
 
 Options: `width`/`height` (display px; default the map's size), `pixelRatio` (device px per display
-px), `facing` (`'left'` by default: particles leave from the right), `emitMaxY`, `look` (dot size,
-drift, particles, breathing, sleep, burst; see `Look` and `DEFAULT_LOOK`), `motion` (per mood; see
+px), `dot` (dot size in display px at the same picture size; overrides `look.cell`),
+`particlesFrom`, `emitMaxY`, `look` (dot size,
+drift, breathing, blinking, sleep, and the extras; see `Look` and `DEFAULT_LOOK`), `blinkFrame`
+(default `'blink'`), `motion` (per mood; see
 `DEFAULT_MOTION`), `className`. `look` can also be changed live: `p.look.particles = 30`.
 
 ## Notes
