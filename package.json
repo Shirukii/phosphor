@@ -1,0 +1,11 @@
+{
+  "name": "phosphor",
+  "version": "0.1.0",
+  "description": "A picture drawn as a breathing grid of dithered LED dots, in one WebGL1 shader",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "main": "src/phosphor.ts",
+  "exports": { ".": "./src/phosphor.ts" },
+  "scripts": { "typecheck": "tsc --noEmit -p ." },
+  "devDependencies": { "typescript": "~5.9.3" }
+}
