@@ -84,7 +84,7 @@ def tone(shaded: np.ndarray, mask: np.ndarray, wp: float, T: Tone) -> np.ndarray
 def pack(vals: np.ndarray) -> str:
     v = vals.ravel()
     if v.size % 2:
-        v = np.append(v, 0)
+        v = np.append(v, np.zeros(1, v.dtype))  # (np.append(v, 0) would widen to int64)
     return base64.b64encode((v[0::2] << 4 | v[1::2]).tobytes()).decode()
 
 
