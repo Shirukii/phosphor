@@ -194,7 +194,8 @@ class Glow:
     core_fade: float = 8.0      # dots over which the hot core's orange fades to green at its edge
     grain: float = 0.2          # share of the hot core's dots turned white (and half that magenta)
     lit_floor: float = 0.3      # the least density in the figure's brightest broad light (its top tenth)
-    lit_mass: float = 0.6       # the density the brightest broad light reaches (its top few percent)
+    lit_mass: float = 0.85      # the density the brightest broad light reaches (its top few percent)
+    mass_from: float = 65.0     # percentile of the figure's broad light where the dense mass starts
     halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
     feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
@@ -294,7 +295,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         q50, q90 = np.percentile(soft[body], [50, 90])
         lit_s = np.clip((soft - q50) / max(q90 - q50, 1e-3), 0, 1)
         p = np.maximum(p, P.lit_floor * lit_s * lit_s * (3 - 2 * lit_s) * body)
-        q80, q97 = np.percentile(soft[body], [80, 97])
+        q80, q97 = np.percentile(soft[body], [P.mass_from, 97])
         top_s = np.clip((soft - q80) / max(q97 - q80, 1e-3), 0, 1)
         p = np.maximum(p, P.lit_mass * top_s * top_s * (3 - 2 * top_s) * body)   # the very brightest a dense mass
     thr = P.order * bayer(H, W) + (1 - P.order) * rng.random((H, W), np.float32)
@@ -687,10 +688,10 @@ class Dust:
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
-    mote_len: tuple[int, int] = (4, 10)  # dots in a mote: a short dash along its way
+    mote_len: tuple[int, int] = (3, 8)  # dots in a mote: a short dash along its way
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
-    thick: float = 0.35         # share of motes two dots thick
+    thick: float = 0.2          # share of motes two dots thick
     lanes: float = 0.7          # how much the motes gather in lanes along the drift (0: evenly)
     jitter_size: float = 15.0   # how wide the regions are that stray together (dots)
     jitter: float = 18.0        # how far each mote's heading strays from its lane's (degrees, typical)
