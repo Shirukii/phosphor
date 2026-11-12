@@ -552,7 +552,8 @@ class Streak:
     strands: tuple[int, int] = (1, 1)   # streaks in a bundle, side by side
     rain_len: tuple[int, int] = (20, 64)
     rain_angle: float = -24     # degrees from the right, upwards negative (screen y is down)
-    rain_gaps: float = 0.35     # gaps in a streak (0: solid): dotted, broken runs
+    rain_gaps: float = 0.18     # gaps in a streak (0: solid): dotted, broken runs
+    rain_alt: float = 0.1       # share of streaks with every other dot gone
 
 
 def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None, hold_j: float = 0.0) -> np.ndarray:
@@ -671,7 +672,7 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
     r_across, r_along = across.copy(), ((rng.random(len(across)) - 0.5) * span).astype(np.float32)
     rl = rng.integers(P.rain_len[0], P.rain_len[1] + 1, nr)
     jj = np.arange(P.rain_len[1])[None, :]
-    alt = (rng.random(nr) < 0.5)[:, None] & (jj % 2 == 1) & (rng.random((nr, 1 + 0 * jj.shape[1])) > 0.25)          # some every other dot
+    alt = (rng.random(nr) < P.rain_alt)[:, None] & (jj % 2 == 1) & (rng.random((nr, 1 + 0 * jj.shape[1])) > 0.25)          # some every other dot
     gaps = rng.random((nr, P.rain_len[1])) < P.rain_gaps + 0.8 * np.abs(2 * jj / rl[:, None] - 1) ** 3   # thinning at both ends
     gaps |= alt
     yy = np.mgrid[0:H, 0:W][0]
