@@ -37,7 +37,7 @@ class Glow2:
     bloom: float = 1.0         # how much hotter light runs where much light is gathered round it
     halo: float = 0.15         # how much of the bloom spills into the black round the light
     bloom_size: float = 6.0    # its radius (dots)
-    draw: float | None = None  # draw the picture as lines and lit planes: 1 yes, 0 as it is, None by its look
+    draw: float | None = 0.0   # draw the picture as lines and lit planes: 1 yes, 0 as it is, None by its look (off: lost the user's pick 0 to 12)
     line_level: float = 0.85   # which edges become lines (percentile of edge strength in the subject)
     line_heat: tuple = (0.40, 0.75)   # a line's heat in the shade, and in full light
     plane_from: float = 0.70   # the light (percentile in the subject) where lit planes start
