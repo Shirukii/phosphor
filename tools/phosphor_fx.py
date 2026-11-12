@@ -196,6 +196,7 @@ class Glow:
     gain: float = 1.0          # more or less light, after the levelling
     twinkle: float = 0.5       # share of the shade's sparse dots that blink (0: the picture is still)
     twinkle_hold: int = 2      # frames a blink lasts
+    twinkle_rate: float = 0.3  # how often a blinking dot changes: its chance each time
     expose: float = 1.0        # how far each picture's light is brought to one level (0: as it is)
     expose_high: float = 0.9   # where the brightest light (the top half percent of the subject) is put
     expose_mid: float = 0.36   # the least the middle light (its median) is lifted to
@@ -210,11 +211,18 @@ class Glow:
     source_size: float = 0.04  # how far that heat reaches round it, as a share of the frame
     source_spill: float = 0.04 # how much of it lights the black round the source
     source_xy: tuple | None = None   # the source set by hand (x, y, 0..1 of the frame)
-    spread: float = 0.6        # how far the dither may reach for colours off the target
-    warm_from: float = 0.7     # the ramp up to here is cool (the Warmth control leaves it alone)
-    # heat -> colour: black, blue, teal, salmon, pale
-    ramp: tuple = ((0.0, (0, 0, 0)), (0.45, (44, 114, 222)), (0.7, (61, 157, 152)), (0.82, (79, 190, 100)),
-                   (0.92, (226, 140, 99)), (1.0, (245, 190, 170)))
+    warm: float = 1.0          # how much of the mix is warm (magenta, orange): the Warmth control
+    # heat -> how many of the dots are lit there, and their mix of blue, green, magenta, orange, white.
+    # Measured off the references: even the sparsest dots are only five-sixths blue, with a few of
+    # every other colour among them; round the light a band rich in green; the light itself orange
+    # and magenta with a little white, hardly any blue.
+    ramp: tuple = ((0.0, 0.0, (0.83, 0.06, 0.05, 0.045, 0.015)),
+                   (0.2, 0.2, (0.83, 0.06, 0.05, 0.045, 0.015)),
+                   (0.45, 0.5, (0.83, 0.06, 0.05, 0.045, 0.015)),
+                   (0.6, 0.7, (0.68, 0.16, 0.07, 0.07, 0.02)),
+                   (0.75, 0.86, (0.42, 0.38, 0.08, 0.10, 0.02)),
+                   (0.88, 0.96, (0.12, 0.10, 0.30, 0.45, 0.03)),
+                   (1.0, 1.0, (0.04, 0.02, 0.32, 0.52, 0.10)))
 
 
 def light(rgba: np.ndarray) -> np.ndarray:
@@ -289,39 +297,42 @@ def exposed(v: np.ndarray, P: Glow) -> np.ndarray:
     return (v + P.expose * (out - v)).astype(np.float32)
 
 
-def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> tuple[np.ndarray, np.ndarray]:
-    """Pattern dither: per dot, n palette picks (dark to light) whose mix nears the target, and its Bayer cell."""
-    h, w, _ = target.shape
-    t = target.reshape(-1, 3)
-    err = np.zeros_like(t)
-    picks = np.empty((n, t.shape[0]), np.int16)
-    for i in range(n):
-        want = t + err * spread
-        picks[i] = ((want[:, None, :] - pal[None]) ** 2).sum(-1).argmin(1)
-        err += t - pal[picks[i]]
-    lum = pal @ np.array([0.299, 0.587, 0.114], np.float32)
-    order = np.argsort(lum[picks], axis=0, kind='stable')
-    picks = np.take_along_axis(picks, order, 0)
-    cell = np.tile(BAYER4, (h // 4 + 1, w // 4 + 1))[:h, :w].reshape(-1)
-    return picks, cell
+ORDER = np.array([0, 1, 3, 2, 4, 5])   # the palette dark to light: black, blue, magenta, green, orange, white
 
 
-def animate(picks: np.ndarray, cell: np.ndarray, shape: tuple, P: Glow, seed: int) -> np.ndarray:
-    """The frames: each dot takes the pick its Bayer cell names; blinking dots take a fresh cell in turn."""
-    h, w = shape
-    dots = np.arange(cell.size)
-    still = picks[cell, dots]
-    if P.frames <= 1 or not P.twinkle:
-        return np.repeat(still.reshape(1, h, w), max(P.frames, 1), 0).astype(np.uint8)
+def pattern(cover: np.ndarray, mix: np.ndarray, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """Pattern dither of a mix. Per dot: how much of it is lit (cover, 0..1) and the shares of the five
+    colours among the lit (mix, (..., 5): blue, green, magenta, orange, white). Returns, per dot, the
+    thresholds at which it steps up from black through the colours dark to light, and its own
+    threshold: its place in the 4x4 Bayer pattern, shaken within its step so small shares still show."""
+    h, w = cover.shape
+    share = np.concatenate([1 - cover[..., None], cover[..., None] * mix], -1).reshape(-1, 6)[:, ORDER]
+    steps = np.cumsum(share, 1)[:, :-1].astype(np.float32)
     rng = np.random.default_rng(seed)
-    # the shade: dots whose mix holds black, so they are lit only some of the time
-    sparse = (picks == 0).any(0) & (picks != 0).any(0)
-    blink = np.where(sparse & (rng.random(cell.size) < P.twinkle))[0]
-    out = np.empty((P.frames, cell.size), np.uint8)
-    steps = -(-P.frames // P.twinkle_hold)
-    for k in range(steps):
-        f = still.copy()
-        f[blink] = picks[rng.integers(0, picks.shape[0], blink.size), blink]
+    cell = np.tile(BAYER4, (h // 4 + 1, w // 4 + 1))[:h, :w].reshape(-1)
+    return steps, ((cell + rng.random(cell.size)) / 16).astype(np.float32)
+
+
+def dots(steps: np.ndarray, t: np.ndarray) -> np.ndarray:
+    """The palette index of each dot, for its threshold t."""
+    return ORDER[(t[:, None] >= steps).sum(1)].astype(np.uint8)
+
+
+def animate(steps: np.ndarray, t: np.ndarray, shape: tuple, P: Glow, seed: int) -> np.ndarray:
+    """The frames: the picture holds; blinking dots take a fresh threshold in turn."""
+    h, w = shape
+    still = dots(steps, t)
+    if P.frames <= 1 or not P.twinkle:
+        return np.repeat(still.reshape(1, h, w), max(P.frames, 1), 0)
+    rng = np.random.default_rng(seed + 1)
+    # the shade: dots lit only some of the time
+    sparse = (steps[:, 0] > 0.02) & (steps[:, 0] < 0.98)
+    blink = np.where(sparse & (rng.random(t.size) < P.twinkle))[0]
+    out = np.empty((P.frames, t.size), np.uint8)
+    f = still.copy()
+    for k in range(-(-P.frames // P.twinkle_hold)):
+        now = blink[rng.random(blink.size) < P.twinkle_rate]
+        f[now] = dots(steps[now], rng.random(now.size).astype(np.float32))
         out[k * P.twinkle_hold:(k + 1) * P.twinkle_hold] = f
     return out.reshape(P.frames, h, w)
 
@@ -344,11 +355,16 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         heat = heat * (1 + P.source * near_source) \
             + P.source_spill * P.source * near_source
     heat = np.clip(heat, 0, 1)
-    xs = np.array([s for s, _ in P.ramp], np.float32)
-    cs = np.array([c for _, c in P.ramp], np.float32)
-    target = np.stack([np.interp(heat, xs, cs[:, k]) for k in range(3)], -1).astype(np.float32)
-    picks, cell = knoll(target, GLOW_PALETTE, P.spread)
-    return animate(picks, cell, heat.shape, P, seed), GLOW_PALETTE.astype(np.uint8)
+    xs = np.array([s for s, _, _ in P.ramp], np.float32)
+    mix = np.array([m for _, _, m in P.ramp], np.float32)
+    mix[:, 2:4] *= P.warm                      # more or less of it warm, the rest made up in blue
+    mix[:, 0] = np.maximum(1 - mix[:, 1:].sum(1), 0)
+    mix = mix / mix.sum(1, keepdims=True)
+    cs = np.array([c for _, c, _ in P.ramp], np.float32)
+    cover = np.interp(heat, xs, cs).astype(np.float32)
+    shares = np.stack([np.interp(heat, xs, mix[:, k]) for k in range(5)], -1).astype(np.float32)
+    steps, t = pattern(cover, shares, seed)
+    return animate(steps, t, heat.shape, P, seed), GLOW_PALETTE.astype(np.uint8)
 
 
 # ---- streak
@@ -1124,8 +1140,7 @@ def tune(P, t: dict | None):
         P.white = P.black + (P.white - P.black) / max(h, 0.25) ** 0.5   # more of the light reaches the top of the ramp
         P.bloom *= h
         P.source *= w
-        top = P.ramp[-1][0]   # the warm end of the ramp starts lower, or higher
-        P.ramp = tuple((s if s <= P.warm_from else max(P.warm_from + 0.01, top - (top - s) * w), c) for s, c in P.ramp)
+        P.warm *= w
         if t.get('focus') is not None:
             P.source_xy = (float(t['focus'][0]), float(t['focus'][1]))
     elif isinstance(P, Dust):
