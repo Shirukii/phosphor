@@ -190,6 +190,7 @@ class Glow:
     solid: float = 0.2          # share of the figure lit near solid (picks the curve per picture; 0: use gamma)
     gamma: float = 3.0          # tone curve (higher: the shade empties out more)
     fill: float = 0.65          # the densest the dots get outside the brightest light
+    hot_fill: float = 0.9       # how solid the hot core is
     hot: float = 0.05           # share of the figure, its brightest broad light, coloured in calm bands
     core: float = 0.05          # share of the figure, its brightest, that may go near solid
     most: float = 0.95          # the densest the dots get: the brightest light near solid
@@ -204,7 +205,7 @@ class Glow:
     lines: float = 0.15         # how much of the contours is drawn as a line
     rim: float = 0.7            # how dense the rim lines are
     outline: float = 0.45       # how much of the unlit outline is drawn, sparse and cool
-    rim_lines: int = 2          # parallel lines along a rim, a dot wide, a dot of black between
+    rim_lines: int = 3          # parallel lines along a rim, a dot wide, a dot of black between
     rim_level: float = 0.985    # which edges get one (percentile of edge strength; the outline always)
     line_level: float = 0.99    # which edges count as contours (percentile of edge strength)
     ramp: tuple = (0.0, 0.3, 0.8, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
@@ -290,6 +291,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     zone = cv2.GaussianBlur(ts, (0, 0), P.zones)
     hot = zone > (np.quantile(zone[body], 1 - P.hot) if body.any() else 2)   # the hot core: calm, banded colour
     hot = cv2.GaussianBlur(hot.astype(np.float32), (0, 0), 2)
+    if body.any():   # the core near solid, if the light has one: evenly lit line art has none
+        q50, q95 = np.quantile(zone[body], [0.5, 0.95])
+        lift = float(np.clip(((q95 - q50) / (q50 + 0.05) - 0.3) / 0.25, 0, 1))
+        p = np.where((hot > 0.5) & body, np.maximum(p, P.hot_fill * lift), p)
     v = zone + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
     lit0 = thr < p
     anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
@@ -305,7 +310,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     hi = float(np.percentile(gm[a > 0.5], P.line_level * 100)) if (a > 0.5).any() else 100.0
     contour = cv2.Canny(l8, max(4, hi * 0.35), max(8, hi)) > 0
     n, lab = cv2.connectedComponents(contour.astype(np.uint8), connectivity=8)
-    pick = rng.choice(np.array([ORANGE, SALMON, WHITE, BLUE2, MAGENTA], np.uint8), n, p=[0.06, 0.14, 0.06, 0.5, 0.24])
+    pick = rng.choice(np.array([ORANGE, SALMON, WHITE, BLUE2, MAGENTA], np.uint8), n, p=[0.06, 0.14, 0.06, 0.38, 0.36])
     contour &= rng.random((H, W)) < P.lines
     p = np.where(contour, 1.0, p)
     col[contour] = pick[lab[contour]]
@@ -326,7 +331,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     near = lit_side & bright & (d < 2 * P.rim_lines)
     runs = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 1.5)   # colour in runs of a few dots
     runs = np.argsort(np.argsort(runs, axis=None)).reshape(H, W) / runs.size
-    first = np.array([ORANGE, WHITE, SALMON, MAGENTA], np.uint8)[np.digitize(runs, [0.3, 0.55, 0.85])]
+    first = np.array([ORANGE, WHITE, SALMON, MAGENTA], np.uint8)[np.digitize(runs, [0.3, 0.5, 0.72])]
     wide = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 15)
     wide = np.clip(0.5 + (wide - wide.mean()) / (wide.std() + 1e-6) * 0.35, 0.15, 1)   # the rim's weight changes along it
     rows = [(first, 1.0), (SALMON, 0.85), (MAGENTA, 0.6), (BLUE2, 0.4)]
@@ -455,11 +460,11 @@ class Streak:
     dash_len: tuple[int, int] = (3, 7)
     field: int = 40             # dashes drawing the texture the dither leaves black (waves, hair, cloth in shade)
     field_len: tuple[int, int] = (2, 5)
-    rain: int = 260             # bundles of streaks across the frame
+    rain: int = 320             # bundles of streaks across the frame
     strands: tuple[int, int] = (1, 1)   # streaks in a bundle, side by side
-    rain_len: tuple[int, int] = (12, 48)
+    rain_len: tuple[int, int] = (20, 64)
     rain_angle: float = -24     # degrees from the right, upwards negative (screen y is down)
-    rain_gaps: float = 0.2      # gaps in a streak (0: solid): dotted, broken runs
+    rain_gaps: float = 0.35     # gaps in a streak (0: solid): dotted, broken runs
 
 
 def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None) -> np.ndarray:
@@ -614,8 +619,9 @@ class Dust:
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 5           # four-point glints on the brightest light, each for part of the loop
-    mote_len: tuple[int, int] = (2, 6)   # dots in a mote: a short dash along its way
-    bend: float = 0.3           # how far the lanes curve off the angle
+    mote_len: tuple[int, int] = (2, 7)   # dots in a mote: a short dash along its way
+    swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
+    bend: float = 0.2           # how far the lanes curve off the angle
     comb: float = 0.6           # how far the flecks lie along the drift, not the shapes, inside the figure
 
 
@@ -631,6 +637,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     pal = (lv[:, None] * c[None]).astype(np.uint8)
     NL = len(lv) - 1
     tt = np.clip(P.gain * np.clip((t - P.black) / (1 - P.black), 0, 1) ** P.gamma, 0, 1).astype(np.float32)
+    if (a > 0.5).any():   # the figure's brightest at full light, whatever the picture
+        tt = np.clip(tt / max(float(np.percentile(tt[a > 0.5], 98)), 0.2), 0, 1).astype(np.float32)
 
     # how far each px is along the angle across the figure: its far side comes apart
     th = math.radians(P.angle)
@@ -663,7 +671,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
 
     bay = bayer(H, W)
     k8 = np.ones((3, 3), np.float32); k8[1, 1] = 0
-    rim = ((sil > 0.5) | (ed > np.percentile(ed[a > 0.5], 97) if (a > 0.5).any() else sil > 0.5)) & (sw < 0.5) & (a > 0.3)
+    strong_ed = (ed > np.percentile(ed[a > 0.5], 97)) & (sw < 0.5) if (a > 0.5).any() else np.zeros_like(a, bool)
+    rim = ((sil > 0.5) | strong_ed) & (a > 0.3)   # the outline holds even where the figure comes apart
 
     def flat_noise():
         n = rng.random((H, W)).astype(np.float32)
@@ -688,6 +697,12 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     tv *= np.where((tv @ dv) < 0, -1, 1)[:, None]          # the tangent pointing the way of the drift
     tv = np.where((np.abs(tv @ dv) > 0.6)[:, None], tv, dv)   # and only where it runs roughly that way
     sv = (1 - P.curl) * dv + P.curl * tv
+    if P.swirl > 0:   # the field turns a little region by region: lanes swirl, not ripple in step
+        sn = cv2.GaussianBlur(rng.normal(0, 1, (H, W)).astype(np.float32), (0, 0), max(H, W) / 8)
+        sn = sn / (sn.std() + 1e-6) * math.radians(P.swirl)
+        ang = sn[iy, ix]
+        c, s_ = np.cos(ang)[:, None], np.sin(ang)[:, None]
+        sv = np.concatenate([sv[:, :1] * c - sv[:, 1:] * s_, sv[:, :1] * s_ + sv[:, 1:] * c], 1)
     sv /= np.linalg.norm(sv, axis=1, keepdims=True) + 1e-6
     sfar = (P.reach * math.sqrt(many) * rng.uniform(0.4, 1, k) * (0.4 + 0.6 * sw[iy, ix])).astype(np.float32)
     sbend = rng.normal(0, P.bend, k).astype(np.float32)     # a slow drift sideways too: the lanes curve
@@ -722,7 +737,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         if P.shade_lev > 0:   # brighter specks where it's lit: the greys follow the light, not chance
             lev = np.clip(np.round((1 - P.shade_lev) * lev + P.shade_lev * (1.5 + (NL - 1) * np.sqrt(tt))), 1, NL).astype(int)
         if P.outline > 0:   # the silhouette and strongest edges as bright strokes; stray dim specks go
-            lit &= ~((lev <= 2) & (cv2.filter2D(lit.astype(np.uint8), -1, k8, borderType=cv2.BORDER_CONSTANT) == 0))
+            lit &= ~((lev <= 3) & (cv2.filter2D(lit.astype(np.uint8), -1, k8, borderType=cv2.BORDER_CONSTANT) == 0))
             stroke = rim & (rng.random((H, W)) < P.outline)
             lit |= stroke
             lev = np.where(stroke, NL - rng.integers(0, 2, (H, W)), lev)
