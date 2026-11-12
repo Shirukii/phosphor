@@ -73,11 +73,12 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
 
 `tools/phosphor_fx.py` draws a picture as a loop of dots on black, in one of three styles:
 
-- **glow:** eight colours, dithered on a fine grid: sparse blue dots in the shade, building through
-  green and pink to orange and white where the light gathers, contours and thin rim lines along the
-  lit edges, a few lone specks round the figure, and dotted drips falling from its lower edges. A
-  light source in the picture (a flame, a lamp) becomes a white-orange core with a halo through
-  green into blue. 3 s at 24 fps.
+- **glow:** six colours on black. The picture's light is levelled, turned into one smooth ramp of
+  colour (black, blue, teal, salmon, pale) and pattern-dithered onto the palette: the shade is a
+  sparse lattice of blue dots, full tones are checkers of two or three colours. Light runs hotter
+  where much of it gathers and round the picture's one light source. The picture holds still while
+  the sparse dots of the shade blink. A drawing on white paper is inverted: its lines are the
+  light. 3 s at 24 fps.
 - **streak:** one colour (red by default) on a coarse grid, error-diffused afresh each frame so the
   figure boils, short dashes along its shapes (and drawing the texture of its shaded parts, where
   the dither leaves black), clean black round it but for loose specks gathering towards the bottom, and slanted rain
@@ -101,7 +102,7 @@ work best on detailed, lit pictures: the edges and the light are what they draw.
 
 In the web page each style also has hand controls, since no one setting suits every picture: Light
 (exposure), Highlights (how big and dense the brightest light gets), and for glow Warmth (how much
-of the light turns warm) and Focus (click the picture: the light gathers there). Dust's drift is set
+of the light turns warm) and Focus (click the picture: that point becomes the light source). Dust's drift is set
 on a dial, or left on Auto.
 
 The server keeps pictures in memory while it runs, and only listens on localhost. It has no

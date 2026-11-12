@@ -2,14 +2,13 @@
 """Render a picture as a looping clip of dots on black, in one of three styles.
 
     phosphor_fx.py PICTURE [--style glow|streak|dust|all] [--long N] [--scale N] [--frames N] [--fps N]
-                   [--cutout] [--colour C] [--angle DEG] [--seed N] [--out DIR] [--formats gif,webp,png]
+                   [--cutout] [--colour C] [--angle DEG] [--flat] [--seed N] [--out DIR] [--formats gif,webp,png]
 
-  glow    eight colours on black, dithered: a sparse field of blue dots in the shade (dim navy at its faintest),
-          green, orange and white in zones where the light gathers, contours in salmon, orange,
-          blue and pink, pink on the dark side of edges, and a rim of thin parallel lines round
-          the figure. The shape holds still while light and sparks run through it in slanted
-          streaks, and bundles of lines grow out of its outline and draw back, along one line
-          (--angle, degrees: 0 across, 90 up and down).
+  glow    six colours on black: the picture's light, levelled, as one smooth ramp of colour
+          (black, blue, teal, salmon, pale) pattern-dithered onto the palette, so the shade is a
+          sparse lattice of blue dots and full tones are checkers of two or three colours. Light
+          runs hotter where much of it gathers, and round the picture's one light source. The
+          picture holds still; the sparse dots of the shade blink.
   streak  one colour (--colour, default red) on a coarse grid: the figure error-diffused afresh
           every frame so it boils, short dashes along its shapes (and over the texture of its
           shaded parts, which the dither leaves black), loose specks gathering towards the bottom,
@@ -18,8 +17,10 @@
           as bright strokes, short flecks along the shapes and a few glints; from its darker side
           along --angle the figure comes apart in lanes of dashes that drift off and fade.
 
-These follow the looks of the references: glow measured at ~9% of dots lit, most of them blue,
-~1.4% of the frame changing from one frame to the next; streak a coarse, boiling stipple on clean
+These follow the looks of the references: glow's dots, their colours block by block and their
+blinking were measured off them (the light constant, a tenth to a fifth of the lit dots changing
+from one frame to the next);
+streak a coarse, boiling stipple on clean
 black, in a half- to one-second loop; dust a sparse field of grey flecks (~17% lit in the face),
 the hair drifting off in strands.
 
@@ -135,7 +136,7 @@ def analyse(rgba: np.ndarray) -> dict:
     lam = np.sqrt((jxx - jyy) ** 2 + 4 * jxy ** 2)
     mag = np.hypot(gx, gy)
     edge = np.clip(mag / (np.percentile(mag[inside], 97) if inside.any() else mag.max() or 1), 0, 1)
-    return dict(tone=tone, plain=plain, alpha=a, warm=warm, hue_warm=hue_warm, lum=(lum * (a > 0.5)).astype(np.float32), tx=np.cos(ang).astype(np.float32),
+    return dict(rgba=rgba, tone=tone, plain=plain, alpha=a, warm=warm, hue_warm=hue_warm, lum=(lum * (a > 0.5)).astype(np.float32), tx=np.cos(ang).astype(np.float32),
                 ty=np.sin(ang).astype(np.float32), coh=(lam / (jxx + jyy)).astype(np.float32),
                 edge=edge.astype(np.float32), flat=(flat * (a > 0.5)).astype(np.float32))
 
@@ -175,561 +176,179 @@ def hex_rgb(h: str) -> tuple[int, int, int]:
 
 
 # ---- glow
+#
+# What the reference pieces show, dot by dot: a full tone is a strict checker of two palette colours
+# with a third on every fourth dot, and the average colour of any small block runs along one curve
+# from black through blue and teal to salmon. That is an ordered (pattern) dither of a smooth
+# coloured picture onto the palette, not dots placed by rule. And frame by frame: the picture holds,
+# its light stays the same, and the sparse dots of the shade blink, each on for a couple of frames.
 
-# measured off the references: two blues carry two thirds of the lit dots
-GLOW_PALETTE = ['#000000', '#2c75dc', '#2a6ed2', '#53ce5a', '#f08a3a', '#b04cbc', '#faf5f3', '#c24dc5', '#1a2f6a']
-BLUE, BLUE2, GREEN, ORANGE, MAGENTA, WHITE, SALMON, NAVY = range(1, 9)
+GLOW_PALETTE = np.array([(0, 0, 0), (44, 114, 222), (79, 200, 82), (181, 73, 195), (237, 141, 55), (255, 255, 255)], np.float32)
+BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]])
 
 
 @dataclass
 class Glow:
-    frames: int = 72
+    frames: int = 72           # frames in the loop (1: a still)
     fps: int = 24
-    long: int = 540             # dots across the longer side
+    long: int = 540            # dots across the longer side
     scale: int = 2
-    density: float = 0.11       # dots lit in the figure, on average (0: no auto exposure)
-    gain: float = 1.0           # more or less light than that
-    solid: float = 0.2          # share of the figure lit near solid (picks the curve per picture; 0: use gamma)
-    gamma: float = 3.0          # tone curve (higher: the shade empties out more)
-    fill: float = 0.55          # the densest the dots get outside the brightest light
-    core_halo: float = 0.25     # density added round the hot core, fading over about 8 dots
-    core_fade: float = 8.0      # dots over which the hot core's orange fades to green at its edge
-    grain: float = 0.2          # share of the hot core's dots turned white (and half that magenta)
-    lit_floor: float = 0.18      # the least density in the figure's brightest broad light (its top tenth)
-    lit_mass: float = 0.35      # the density the brightest broad light reaches (its top few percent)
-    mass_from: float = 50.0     # percentile of the figure's broad light where the dense mass starts
-    halo: float = 0.0           # sparse dots over the mid-tones, so the shade fades out
-    hot_fill: float = 0.7       # how solid the hot core is
-    feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
-    hot: float = 0.01           # share of the figure, its brightest broad light, coloured in calm bands
-    core: float = 0.05          # share of the figure, its brightest, that may go near solid
-    most: float = 0.8          # the densest the dots get: the brightest light near solid
-    even: float = 0.25          # how much of the locally evened light (CLAHE) the tone takes
-    sharpen: float = 1.0        # unsharp amount: the halo along edges
-    radius: float = 1.6         # and its radius (dots)
-    order: float = 0.5          # ordered (Bayer) against random dither: 1 all ordered
-    lattice: float = 0.25        # how far the dither follows a 2x2 Bayer lattice: checkered mid-tones
-    cross: float = 0.7          # how much the random dither's noise is shared with the dots beside, above and below
-    hue: float = 0.02           # how much neighbouring dots' colours scatter
-    zones: float = 10.0         # how broad the light is that sets the colour (dots)
-    mix: float = 0.5            # how far neighbouring zones checker into each other, dot by dot
-    scatter: float = 1.4        # random spread of the colour steps round the light's top end
-    edge_mix: float = 0.6       # how far the hot core's edge mixes its colour with the light round it
-    focus: float = 0.3          # how far the colour gathers its warmth round the main light (0: anywhere it is bright)
-    focus_size: float = 0.12     # how broad that main light is, as a share of the frame
-    edge_hue: float = 0.05      # how far fine edges push the colour up the ramp
-    lines: float = 0.15         # how much of the contours is drawn as a line
-    rim: float = 0.4            # how dense the rim lines are
-    outline: float = 0.0       # how much of the unlit outline is drawn, sparse and cool
-    rim_lines: int = 2          # parallel lines along a rim, a dot wide, a dot of black between
-    rim_breaks: float = 0.3     # share of the rim's length left out, in stretches
-    rim_fill: float = 0.8       # how much of the black between the inner rim lines is filled
-    rim_level: float = 0.985    # which edges get one (percentile of edge strength; the outline always)
-    line_level: float = 0.99    # which edges count as contours (percentile of edge strength)
-    ramp: tuple = (0.0,0.3,0.72,0.92,0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
-    floor: float = 0.05         # the least light in the figure: its shade never quite goes black
-    fringe: float = 0.2         # magenta on the dark side of bright edges
-    warmth: float = 0.15        # how far the picture's own warm light leans to orange
-    twinkle: float = 0.06       # share of dots given a fresh threshold each frame
-    shimmer: float = 0.01       # share of dots that flicker over the loop
-    flow: float = 0.0          # light running through the figure in streaks along the angle
-    flow_speed: float = 6.0     # px per frame
-    flow_len: float = 12.0      # how long a streak of it is (px, soft)
-    flow_width: float = 0.8     # and how wide (px, soft): thin sweeps
-    sparks: float = 0.0        # share of the scrolling field lit as sparks running through the light
-    tilt: float = -20           # the flow's slant from the angle (degrees)
-    streams: int = 30           # bundles of lines streaming out of the picture
-    strands: tuple[int, int] = (1,1)   # lines in a bundle, 2 dots apart
-    stream_len: tuple[int, int] = (20,90)  # dots in one, at its longest
-    angle: float = 0            # the way they go (degrees: 0 right, 90 down)
-    both: bool = True           # and the opposite way too
-    green_cool: float | None = None   # green only on the picture's cooler surfaces: this quantile of its warmth up goes violet (None: green everywhere)
-    line_local: bool = False     # contours coloured by the ramp where they are, not a random pick
-    outline_real: bool = False   # the outline only where the picture has an edge too
-    skin_hue: bool = False      # skin-hued surfaces (red to yellow, even pale) are never green
-    core_scatter: float = 0.0   # share of a warm core's off-checker dots turned pink
-    core_max: float = 0.55      # the densest a warm core gets
-    emit: float = 0.8           # light sources in the picture: halo density (0: off)
-    emit_halo: float = 12.0     # and the halo's reach (dots)
-    warm_abs: float = 0.2       # this warm (red over blue) or more is never green
-    peak_white: float = 0.0    # share of the very top of the light turned white
-    focus_xy: tuple | None = None   # a point the light gathers on (x, y, 0..1 of the frame), set by hand
-    focus_dim: float = 0.0      # how far light away from the picture's focus (flame, lit skin) is dimmed
-    soft_cap: bool = True       # the density cap rises smoothly into the highlights
-    cap_from: float = 0.75      # rank of the light where it starts to rise
-    edge_mid: float = 0.6       # how far mid-tone dots gather on edges and strokes
-    whole_lit: float = 0.4      # a picture not cut out is exposed as if its brightest this share were the figure
-    specks: float = 0.06        # stray lone dots in the black round the figure, as a share of its lit dots
-    speck_reach: float = 25.0   # how far from the figure they scatter (dots)
-    drip: bool = True           # the streams are drips: single dotted columns falling from the figure's lower edges
-    skin: float = 1.0           # warm lit surfaces drawn as a pink/white/orange checker (0: off)
-    skin_max: float = 0.6       # the densest skin gets
-    skin_share: float = 0.09    # the most of the lit dots it may take
-    skin_warm: float = 0.3      # how warm (red over blue) a surface must be to count
-    skin_core: bool = True      # and their brightest light a checker too, not a solid core
-    navy: float = 0.0           # share of the lit dots, the faintest shade, drawn dim navy
-    palette: list = field(default_factory=lambda: list(GLOW_PALETTE))
+    gain: float = 1.0          # more or less light, after the levelling
+    twinkle: float = 0.5       # share of the shade's sparse dots that blink (0: the picture is still)
+    twinkle_hold: int = 2      # frames a blink lasts
+    expose: float = 1.0        # how far each picture's light is brought to one level (0: as it is)
+    expose_high: float = 0.9   # where the brightest light (the top half percent of the subject) is put
+    expose_mid: float = 0.36   # the least the middle light (its median) is lifted to
+    black: float = 0.3        # light below this is black
+    white: float = 1.25        # light at this or more is full
+    gamma: float = 1.0         # tone curve between them
+    lines: float = 0.6         # unsharp amount: thin lines and edges keep their light
+    bloom: float = 1.0         # how much hotter light runs where much light is gathered round it
+    halo: float = 0.15         # how much of the bloom spills into the black round the light
+    bloom_size: float = 6.0    # its radius (dots)
+    source: float = 0.4        # how much the picture's light source lifts the light round it (0: none)
+    source_size: float = 0.04  # how far that heat reaches round it, as a share of the frame
+    source_spill: float = 0.04 # how much of it lights the black round the source
+    source_xy: tuple | None = None   # the source set by hand (x, y, 0..1 of the frame)
+    spread: float = 0.6        # how far the dither may reach for colours off the target
+    warm_from: float = 0.7     # the ramp up to here is cool (the Warmth control leaves it alone)
+    # heat -> colour: black, blue, teal, salmon, pale
+    ramp: tuple = ((0.0, (0, 0, 0)), (0.45, (44, 114, 222)), (0.7, (61, 157, 152)), (0.82, (79, 190, 100)),
+                   (0.92, (226, 140, 99)), (1.0, (245, 190, 170)))
 
 
-def focus_map(A: dict, t: np.ndarray) -> np.ndarray | None:
-    """0..1, where the picture's focus is: small hot compact lights (a flame, a lamp) and lit warm
-    skin, spread wide; None if it has neither."""
-    H, W = t.shape
-    a = A['alpha'] > 0.5
-    if not a.any():
-        return None
-    f = np.zeros((H, W), np.float32)
-    hi = t > max(0.85, float(np.quantile(t[a], 0.995)))   # emitters: tiny, near white, darker round them
-    n, lab, st, cen = cv2.connectedComponentsWithStats(hi.astype(np.uint8))
-    ring = cv2.GaussianBlur(t, (0, 0), 12)
-    for i in range(1, n):
-        if st[i, 4] < 0.004 * H * W and ring[int(cen[i, 1]), int(cen[i, 0])] < 0.6:
-            f[lab == i] = 1.0
-    sk = (cv2.GaussianBlur(A['warm'], (0, 0), 3) > 0.25) & a & (t > np.quantile(t[a], 0.7))
-    f = np.maximum(f, 0.7 * sk)
-    # what stands out: spectral-residual saliency (Hou & Zhang) on a small copy of the light
-    sm = cv2.resize(t, (64, 64), interpolation=cv2.INTER_AREA).astype(np.float32)
-    F = np.fft.fft2(sm); la = np.log(np.abs(F) + 1e-6); ph = np.angle(F)
-    res = la - cv2.blur(la.astype(np.float32), (3, 3))
-    sal = np.abs(np.fft.ifft2(np.exp(res + 1j * ph))) ** 2
-    sal = cv2.GaussianBlur(sal.astype(np.float32), (0, 0), 2.5)
-    sal = cv2.resize(sal / (sal.max() + 1e-9), (W, H), interpolation=cv2.INTER_LINEAR) * a
-    f = np.maximum(f, 0.8 * (sal > np.quantile(sal[a], 0.9)) * (t > np.quantile(t[a], 0.5)))
-    if f.sum() < 10:
-        return None
-    s = 0.12 * max(H, W)
-    k = cv2.GaussianBlur(f, (0, 0), s)
-    return (np.clip(k / (k.max() + 1e-6), 0, 1) ** 0.5).astype(np.float32)
+def light(rgba: np.ndarray) -> np.ndarray:
+    """The picture's light, 0..1. A drawing on white paper (colourless, mostly white) is inverted:
+    its lines are the light."""
+    a = rgba[..., 3:].astype(np.float32) / 255
+    rgb = rgba[..., :3].astype(np.float32) * a
+    lum = rgb @ np.array([0.299, 0.587, 0.114], np.float32) / 255
+    paper = a[..., 0] > 0.5
+    if paper.mean() > 0.5 and float(np.median(lum[paper])) > 0.6 and float((rgb.max(-1) - rgb.min(-1))[paper].mean()) < 8:
+        return ((1 - lum) * a[..., 0]).astype(np.float32)
+    return lum
 
 
-def emitters(A: dict, most: int = 2) -> np.ndarray:
-    """Light sources in the picture (a flame, a lamp, a candle): small near-white blobs dark all round."""
-    L = A['lum']; H, W = L.shape; al = A['alpha'] > 0.5
-    n, lab, st, cen = cv2.connectedComponentsWithStats((L > 0.8).astype(np.uint8))
-    found = []
-    for i in range(1, n):
-        if st[i, 4] < 30 or st[i, 4] > 0.005 * H * W or st[i, 3] < 1.3 * st[i, 2]:   # a flame rises: taller than wide
-            continue
-        x0, y0, w, h = st[i, :4]; m = 16
-        ys, xs = slice(max(0, y0 - m), y0 + h + m), slice(max(0, x0 - m), x0 + w + m)
-        comp = (lab[ys, xs] == i).astype(np.uint8)
-        d = cv2.dilate(comp, np.ones((31, 31), np.uint8)) > 0
-        ann = d & ~(cv2.dilate(comp, np.ones((11, 11), np.uint8)) > 0)
-        full = ann.sum(); ann &= al[ys, xs]
-        if ann.sum() < 0.6 * full:
-            continue
-        yy, xx = np.nonzero(ann)
-        sec = ((np.arctan2(yy + ys.start - cen[i, 1], xx + xs.start - cen[i, 0]) + np.pi) / (2 * np.pi) * 8).astype(int) % 8
-        lv = L[ys, xs][yy, xx]
-        smax = max(float(lv[sec == k].mean()) for k in range(8) if (sec == k).any())
-        if smax < 0.42:   # dark on every side, not a highlight on a lit surface
-            found.append((smax, i))
-    out = np.zeros((H, W), bool)
-    for _, i in sorted(found)[:most]:
-        out |= lab == i
-    return out
+def line_art(rgba: np.ndarray, v: np.ndarray) -> bool:
+    """Is the picture already a drawing: colourless, its light in thin strokes?"""
+    subject = v > 0.06
+    if not subject.any():
+        return True
+    sat = cv2.cvtColor(np.ascontiguousarray(rgba[..., :3]), cv2.COLOR_RGB2HSV)[..., 1][subject].mean() / 255
+    opened = cv2.morphologyEx(v, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    return bool(sat < 0.02 and (v - opened).sum() / max(float(v.sum()), 1e-6) >= 0.18)
+
+
+def emissive(rgba: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Light as a source gives it: bright, or strongly coloured (a red neon tube is dim by luminance)."""
+    if line_art(rgba, v):
+        return v
+    return np.maximum(v, rgba[..., :3].max(-1).astype(np.float32) / 255 * (rgba[..., 3].astype(np.float32) / 255))
+
+
+def source(rgba: np.ndarray, v: np.ndarray, P: Glow) -> np.ndarray:
+    """The light source as a field, 1 on it and falling off round it; zeros if there is none."""
+    h, w = v.shape
+    long = max(h, w)
+    if P.source_xy is not None:
+        region = np.zeros((h, w), np.uint8)
+        cv2.circle(region, (round(P.source_xy[0] * (w - 1)), round(P.source_xy[1] * (h - 1))), max(2, round(0.012 * long)), 1, -1)
+    else:
+        e = emissive(rgba, v)
+        small, large = cv2.GaussianBlur(e, (0, 0), 0.012 * long), cv2.GaussianBlur(e, (0, 0), 0.06 * long)
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        centre = np.exp(-(((xx - w / 2) / (0.45 * w)) ** 2 + ((yy - h / 2) / (0.45 * h)) ** 2))
+        # compact light stands out of its surround (a broad flat white does not); nearer the middle counts more
+        score = (small - 0.4 * large) * (0.5 + 0.5 * centre)
+        m = round(0.04 * long)
+        score[:m], score[-m:], score[:, :m], score[:, -m:] = -1, -1, -1, -1
+        y, x = np.unravel_index(int(score.argmax()), score.shape)
+        if score[y, x] < 0.05:
+            return np.zeros_like(v)
+        n, lab = cv2.connectedComponents((small > 0.8 * small[y, x]).astype(np.uint8))
+        region = (lab == lab[y, x]).astype(np.uint8)
+        if region.sum() > 0.012 * h * w:   # too broad to be one source: keep its heart only
+            near = np.zeros((h, w), np.uint8)
+            cv2.circle(near, (int(x), int(y)), round(0.035 * long), 1, -1)
+            region &= near
+    d = cv2.distanceTransform(1 - region, cv2.DIST_L2, 3)
+    return np.exp(-(d / (P.source_size * long)) ** 2).astype(np.float32)
+
+
+def exposed(v: np.ndarray, P: Glow) -> np.ndarray:
+    """The light at one level: a gain for the brightest light, a curve lifting a low middle."""
+    subject = v > 0.06
+    if not P.expose or subject.sum() < 50:
+        return v
+    mid, high = np.percentile(v[subject], [50, 99.5])
+    gain = float(np.clip(P.expose_high / max(high, 1e-3), 1.0, 1.8))
+    gain = 1 + (gain - 1) * float(np.clip((0.5 - mid) / 0.2, 0, 1))   # a picture bright in the middle needs none
+    m = min(mid * gain, 0.99)
+    gamma = float(np.clip(np.log(P.expose_mid) / np.log(m), 0.65, 1.0)) if m < P.expose_mid else 1.0
+    out = np.clip(v * gain, 0, 1) ** gamma
+    return (v + P.expose * (out - v)).astype(np.float32)
+
+
+def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> tuple[np.ndarray, np.ndarray]:
+    """Pattern dither: per dot, n palette picks (dark to light) whose mix nears the target, and its Bayer cell."""
+    h, w, _ = target.shape
+    t = target.reshape(-1, 3)
+    err = np.zeros_like(t)
+    picks = np.empty((n, t.shape[0]), np.int16)
+    for i in range(n):
+        want = t + err * spread
+        picks[i] = ((want[:, None, :] - pal[None]) ** 2).sum(-1).argmin(1)
+        err += t - pal[picks[i]]
+    lum = pal @ np.array([0.299, 0.587, 0.114], np.float32)
+    order = np.argsort(lum[picks], axis=0, kind='stable')
+    picks = np.take_along_axis(picks, order, 0)
+    cell = np.tile(BAYER4, (h // 4 + 1, w // 4 + 1))[:h, :w].reshape(-1)
+    return picks, cell
+
+
+def animate(picks: np.ndarray, cell: np.ndarray, shape: tuple, P: Glow, seed: int) -> np.ndarray:
+    """The frames: each dot takes the pick its Bayer cell names; blinking dots take a fresh cell in turn."""
+    h, w = shape
+    dots = np.arange(cell.size)
+    still = picks[cell, dots]
+    if P.frames <= 1 or not P.twinkle:
+        return np.repeat(still.reshape(1, h, w), max(P.frames, 1), 0).astype(np.uint8)
+    rng = np.random.default_rng(seed)
+    # the shade: dots whose mix holds black, so they are lit only some of the time
+    sparse = (picks == 0).any(0) & (picks != 0).any(0)
+    blink = np.where(sparse & (rng.random(cell.size) < P.twinkle))[0]
+    out = np.empty((P.frames, cell.size), np.uint8)
+    steps = -(-P.frames // P.twinkle_hold)
+    for k in range(steps):
+        f = still.copy()
+        f[blink] = picks[rng.integers(0, picks.shape[0], blink.size), blink]
+        out[k * P.twinkle_hold:(k + 1) * P.twinkle_hold] = f
+    return out.reshape(P.frames, h, w)
 
 
 def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
+    """The clip: the light levelled, run hotter where it gathers and round its source, coloured
+    through one ramp, pattern-dithered onto the palette; the shade's sparse dots blink."""
     P = P or Glow()
-    rng = np.random.default_rng(seed)
-    a = A['alpha']
-    t = (1 - P.even) * A['plain'] + P.even * A['tone']    # some of the evened-out light: dark pictures keep their shapes
-    H, W = t.shape
-    if P.focus_xy is not None:   # a focus set by hand: the light gathers round that point, the rest dims
-        H_, W_ = t.shape
-        yy, xx = np.mgrid[0:H_, 0:W_].astype(np.float32)
-        sd = 0.22 * max(H_, W_)
-        fm = np.exp(-((xx - P.focus_xy[0] * W_) ** 2 + (yy - P.focus_xy[1] * H_) ** 2) / (2 * sd * sd))
-        t = (t * (1 - max(P.focus_dim, 0.6) * (1 - fm))).astype(np.float32)
-    elif P.focus_dim > 0:   # the light gathers on the picture's focus (a flame, the lit skin): other bright things can't outshine it
-        fmap = focus_map(A, t)
-        if fmap is not None:
-            t = (t * (1 - P.focus_dim * (1 - fmap))).astype(np.float32)
-    pal = np.array([hex_rgb(c) for c in P.palette], np.uint8)
-
-    # the light, sharpened: the overshoot either side of an edge is the halo
-    soft = cv2.GaussianBlur(t, (0, 0), P.radius)
-    hp = t - soft
-    ts = np.clip(t + P.sharpen * hp, 0, 1)
-    # exposure: the gain that puts the figure at `density` dots, so dark and bright pictures alike
-    # come out as sparse as the references (then `gain` on top)
-    # And the curve's steepness that leaves `solid` of the figure near full light: busy pictures
-    # still build solid masses of light, flat ones don't blow out
-    body = a > 0.5
-    k, gam = 1.0, P.gamma
-
-    expo = body
-    if body.mean() > 0.97 and P.whole_lit < 1:   # nothing cut out: expose for the lit part of the picture, not its dark ground
-        expo = cv2.GaussianBlur(ts, (0, 0), 8) > np.quantile(cv2.GaussianBlur(ts, (0, 0), 8), 1 - P.whole_lit)
-    tsb = ts[expo][::7]                  # a sample is plenty to set the exposure
-
-    def expose(g):
-        tb = tsb ** g
-        lo, hi = 0.05, 50.0
-        for _ in range(30):
-            kk = math.sqrt(lo * hi)
-            if np.clip(kk * tb, 0, P.most).mean() < P.density:
-                lo = kk
-            else:
-                hi = kk
-        return kk, (np.clip(kk * tb, 0, P.most) >= 0.7).mean()
-    if P.density > 0 and body.any():
-        k, sol = expose(gam)
-        if P.solid > 0:
-            best = None
-            for g in np.linspace(1.5, 7.0, 12):
-                kk, sl = expose(g)
-                if best is None or abs(sl - P.solid) < abs(best[2] - P.solid):
-                    best = (g, kk, sl)
-            gam, k, _ = best
-    p = np.clip(P.gain * k * ts ** gam, 0, P.most)
-    if P.fill < P.most and body.any():   # solid only in the brightest light; elsewhere the dither keeps gaps
-        if P.soft_cap:   # the cap rises smoothly with the light's rank: no checker-then-pad cliff
-            ex = expo if body.mean() > 0.97 else body
-            qs = np.quantile(ts[ex], np.linspace(0, 1, 101))
-            rank = np.interp(ts, qs, np.linspace(0, 1, 101))
-            u = np.clip((rank - P.cap_from) / (1 - P.cap_from), 0, 1)
-            p = np.minimum(p, P.fill + (P.most - P.fill) * u * u * (3 - 2 * u))
-        else:
-            top = ts > np.quantile(ts[body], 1 - P.core)
-            p = np.where(top, p, np.minimum(p, P.fill))
-    dark_side = np.clip(-hp * 7, 0, 1) * np.clip(soft * 3, 0, 1)   # just off something bright
-    g0 = cv2.GaussianBlur(t, (0, 0), 2.0)
-    g0 = np.hypot(cv2.Sobel(g0, cv2.CV_32F, 1, 0), cv2.Sobel(g0, cv2.CV_32F, 0, 1))
-    big = g0 > (np.percentile(g0[a > 0.5], 95) if (a > 0.5).any() else g0.max())
-    dark_side *= cv2.dilate(big.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0   # only by the strong edges, not over fine texture
-    p = np.maximum(p, P.fringe * 0.7 * dark_side)
-    shade_min = 0.04
-    if body.mean() > 0.97:   # nothing cut out: the dim background isn't the figure's shade
-        shade_min = max(shade_min, float(np.percentile(soft, 100 * (1 - P.whole_lit))))
-    p = np.maximum(p, P.floor * (a > 0.5) * (soft > shade_min))   # the dark of the figure keeps a sparse blue dither
-    p = np.maximum(p, P.halo * np.clip((soft - 0.12) / 0.25, 0, 1) * (a > 0.5) * (soft > shade_min))   # the mid-tones fade out, not cut to black
-    if P.lit_floor > 0 and body.any():   # smooth lit areas (a cheek, a palm) still fill by their light, not only by detail
-        q50, q90 = np.percentile(soft[body], [50, 90])
-        lit_s = np.clip((soft - q50) / max(q90 - q50, 1e-3), 0, 1)
-        p = np.maximum(p, P.lit_floor * lit_s * lit_s * (3 - 2 * lit_s) * body)
-        q80, q97 = np.percentile(soft[body], [P.mass_from, 97])
-        top_s = np.clip((soft - q80) / max(q97 - q80, 1e-3), 0, 1)
-        p = np.maximum(p, P.lit_mass * top_s * top_s * (3 - 2 * top_s) * body)   # the very brightest a dense mass
-    if P.edge_mid > 0 and body.any():   # mid-tones spend their dots along edges and strokes, not evenly over the area
-        e = cv2.GaussianBlur(A['edge'], (0, 0), 1.0)
-        e = np.clip(e / (np.percentile(e[body], 60) + 1e-4), 0, 2)
-        mult = (1 - P.edge_mid) + P.edge_mid * e
-        w = np.clip(1 - np.abs(p - 0.3) / 0.3, 0, 1)
-        p = np.clip(p * (1 + w * (mult - 1)), 0, 1)
-    nz = rng.random((H, W), np.float32)
-    if P.cross > 0:   # noise shared along rows and columns, not corners: dots join in short level and upright runs
-        kx = np.float32([[0, 1, 0], [1, 1, 1], [0, 1, 0]]) / 5
-        nz = (1 - P.cross) * nz + P.cross * cv2.filter2D(nz, -1, kx, borderType=cv2.BORDER_REFLECT)
-        nz = (np.argsort(np.argsort(nz, axis=None)).reshape(H, W) / nz.size).astype(np.float32)
-    thr = P.order * bayer(H, W) + (1 - P.order) * nz
-    if P.lattice > 0:   # a pitch-2 lattice of separate dots, then a checker, then the rest (Bayer 2x2)
-        q = np.float32([[0.0, 0.5], [0.75, 0.25]])   # Bayer 2x2: a checker first, then the rest
-        l2 = np.tile(q, (H // 2 + 1, W // 2 + 1))[:H, :W] + 0.125
-        thr = (1 - P.lattice) * thr + P.lattice * l2
-
-    # colour per dot: by the broad light, in zones along one ramp (blue, blue 2, green, orange,
-    # white), each zone one colour or an ordered checker of its two neighbours on the ramp, never
-    # colours far apart side by side. Where the ramp's steps fall is set by rank among the lit
-    # dots, so every picture gets the references' mix (blue the most by far, white the least).
-    zone = cv2.GaussianBlur(ts, (0, 0), P.zones)
-    hot = zone > (np.quantile(zone[body], 1 - P.hot) if body.any() else 2)   # the hot core: calm, banded colour
-    hot = cv2.GaussianBlur(hot.astype(np.float32), (0, 0), 2)
-    lift = 0.0
-    if body.any():   # the core near solid, if the light has one: evenly lit line art has none
-        q50, q95 = np.quantile(zone[body], [0.5, 0.95])
-        lift = float(np.clip(((q95 - q50) / (q50 + 0.05) - 0.3) / 0.25, 0, 1))
-    # features (eyes, nostrils, mouth, folds): small spots darker than round them, not striations
-    k = max(3, int(round(0.015 * max(H, W))) | 1)
-    th = cv2.morphologyEx(cv2.GaussianBlur(t, (0, 0), 1.0), cv2.MORPH_BLACKHAT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
-    fl = np.percentile(th[body], 92) if body.any() else 1
-    feat = (th > max(fl, 0.03)) & body & (A['coh'] < 0.7)
-    sparse = (cv2.blur((thr < p).astype(np.float32), (15, 15)) < 0.4) & (A['coh'] < 0.4)   # not over busy texture
-    p = np.where(feat & sparse & ~(hot > 0.5), np.maximum(p, P.feat_fill * np.clip(soft * 4, 0, 1)), p)   # drawn, not holes
-    p = np.where((hot > 0.5) & body & ~feat, np.maximum(p, P.hot_fill * lift), p)
-    if P.core_halo > 0 and (hot > 0.5).any():   # the light thins out round the core, not a cliff
-        dt = cv2.distanceTransform((hot <= 0.5).astype(np.uint8), cv2.DIST_L2, 3)
-        p = np.where(body & (hot <= 0.5), np.maximum(p, P.core_halo * lift * np.exp(-dt / 8)), p)
-    if P.hot_fill * lift > 0.85:   # no holes in a solid core, but its features show through
-        hot_solid = (hot > 0.6) & body & ~feat
-    else:
-        hot_solid = np.zeros_like(body)
-    v = zone - 0.25 * feat + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
-    if P.focus > 0 and body.any():   # one or two warm places, where the broad light gathers most: the rest goes cool
-        key = cv2.GaussianBlur(zone, (0, 0), P.focus_size * max(H, W))
-        key = np.clip((key - key[body].min()) / (np.ptp(key[body]) + 1e-6), 0, 1)
-        v = v * (1 - P.focus * (1 - key) * np.clip(1 - 2 * hot, 0, 1))   # not in the hot core: its colour is its own
-    lit0 = thr < p
-    anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
-    r = np.interp(v, np.maximum.accumulate(anchors + np.arange(5) * 1e-6), np.arange(5))
-    ramp = np.array([BLUE, BLUE2, GREEN, ORANGE, WHITE], np.uint8)
-    # round the light's top end the steps scatter into each other over a wide band, as in the
-    # references (orange into green into blue), not a clean contour; the hot core's middle stays calm
-    sw = np.clip(1 - np.abs(r - 2.6) / 1.2, 0, 1) * np.clip((0.9 - hot) / 0.3, 0, 1)
-    col = ramp[np.clip(np.floor(r + P.mix * (bayer(H, W) - 0.5) + P.scatter * sw * (rng.random((H, W)) - 0.5)), 0, 4).astype(int)]   # zones, checkered where they meet
-    col[(col == BLUE2) & (r < 1.2 + P.mix) & (rng.random((H, W)) < 0.5)] = BLUE   # the two blues mingle
-    if P.peak_white > 0:   # a few white dots scattered through the very top of the light
-        col[(r > 3.2) & (col != MAGENTA) & (rng.random((H, W)) < P.peak_white)] = WHITE
-    if P.green_cool is not None:   # the step between blue and orange: violet and pink on warm or neutral surfaces, green only on cool ones
-        wc = cv2.GaussianBlur(A['warm'], (0, 0), 3)
-        g0_ = (col == GREEN) & lit0
-        hw = cv2.GaussianBlur(A['hue_warm'], (0, 0), 3) > 0.6 if P.skin_hue and 'hue_warm' in A else np.zeros((H, W), bool)
-        gsel = (col == GREEN) & (hw | (wc > P.warm_abs) | (wc > (np.quantile(wc[g0_], P.green_cool) if g0_.any() else 0)))   # and anything plainly warm, pale skin too   # the warmer of its green-step dots, relative to the picture
-        col[gsel] = np.where(((np.mgrid[0:H, 0:W].sum(0)) % 2 == 0)[gsel], MAGENTA, SALMON)
-    col[(rng.random((H, W)) < P.fringe * dark_side)] = MAGENTA          # purple just off bright edges
-    if P.grain > 0:   # the hot core's orange grained with white on a fine lattice, not clean bands
-        core_o = (hot > 0.5) & (col >= GREEN) & (col != MAGENTA)
-        gy, gx = np.mgrid[0:H, 0:W]
-        lat = ((gx % 2) == 1) & ((gy % 2) == 1)
-        gr = rng.random((H, W))
-        col[(hot > 0.6) & (col == WHITE) & ~lat & ~((hot > 0.85) & (gr < 0.1))] = ORANGE   # white mostly on the lattice
-        col[core_o & (hot > 0.85) & (col == GREEN)] = ORANGE   # green a ring round the core, never under its white
-        col[core_o & lat & (col == ORANGE) & (rng.random((H, W)) < np.minimum(P.grain * 4.5 * hot, 0.6))] = WHITE   # on orange only, even through the core
-        din = cv2.distanceTransform((hot > 0.5).astype(np.uint8), cv2.DIST_L2, 3)   # the core's edge, wide: orange fades through green
-        col[(col == ORANGE) & (rng.random((H, W)) < 0.85 * np.clip(1 - din / P.core_fade, 0, 1))] = GREEN
-        # and its edge a wide mixed band, not a contour: blue dots well into the core's rim,
-        # orange dots out into the green round it
-        dout = cv2.distanceTransform((hot <= 0.5).astype(np.uint8), cv2.DIST_L2, 3)
-        em = rng.random((H, W))
-        col[(col >= GREEN) & (col <= ORANGE) & (hot > 0.5) & (em < P.edge_mix * 0.5 * np.clip(1 - din / (1.5 * P.core_fade), 0, 1))] = BLUE2
-        col[(col == GREEN) & (hot <= 0.5) & (em < P.edge_mix * 0.6 * np.exp(-dout / 5))] = ORANGE
-        col[(col == GREEN) & (hot <= 0.5) & (em > 1 - P.edge_mix * 0.4 * np.exp(-dout / 6))] = BLUE
-        gb = rng.random((H, W))
-        col[(hot > 0.6) & (col == ORANGE) & (gb < 0.03)] = BLUE2      # the grid broken by a few stray dots
-        col[(hot > 0.6) & (col == ORANGE) & (gb > 0.98)] = MAGENTA
-        col[(hot > 0.6) & (col == MAGENTA) & (dark_side == 0)] = ORANGE
-    if P.skin > 0:   # warm lit surfaces (skin, wood, gold): an interleaved checker of magenta, pink, white and orange
-        ws = cv2.GaussianBlur(A['warm'], (0, 0), 3)
-        cand = body & (ws > P.skin_warm) & (r > 0.8) & (col != MAGENTA) & lit0
-        sk = np.zeros_like(body)
-        if cand.any():   # the warmest, brightest of it, relative to the picture: a warm-toned painting isn't all skin
-            sc_ = (ws - np.median(ws[body])) + 0.15 * r
-            cut = np.quantile(sc_[cand], max(0.0, 1 - P.skin_share * lit0.sum() / cand.sum()))
-            sk = cv2.morphologyEx(((sc_ >= cut) & cand).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8)) > 0
-            sk = cv2.GaussianBlur(sk.astype(np.float32), (0, 0), 2) > 0.5
-            sk &= body & (r > 0.8)
-        u = r + 0.9 * (bayer(H, W) - 0.5)
-        gy, gx = np.mgrid[0:H, 0:W]
-        chk = ((gx + gy) % 2) == 0
-        rr = rng.random((H, W))
-        sc = np.where(u < 1.7, MAGENTA, np.where(u < 2.7, SALMON, np.where(chk & (rr < 0.1), WHITE, np.where(rr < 0.62, ORANGE, SALMON))))
-        sc = np.where((u >= 1.7) & (u < 2.7) & chk & (rng.random((H, W)) < 0.04), WHITE, sc)
-        sc = np.where((u >= 1.7) & (u < 2.7) & ~chk & (rng.random((H, W)) < 0.35), ORANGE, sc)
-        col[sk] = sc[sk].astype(np.uint8)
-        if P.skin_core:   # skin isn't a light: its brightest part is the checker too, not a solid blob
-            hot_solid_kill = sk
-            p = np.where(sk, np.minimum(p, P.skin_max), p)   # skin builds by the tone curve, no forced pad   # the hottest skin dense, no checker of holes
-        else:
-            hot_solid_kill = None
-        # no green collar round warm skin: it goes from warm straight into violet and blue
-        ring = (cv2.dilate(sk.astype(np.uint8), np.ones((13, 13), np.uint8)) > 0) & ~sk & (col == GREEN)
-        col[ring] = np.where(rng.random((H, W))[ring] < 0.4, MAGENTA, BLUE)
-    else:
-        hot_solid_kill = None
-    if P.navy > 0 and lit0.any():   # the faintest shade a dim navy, barely there: the light fades out, not stops
-        nb_ = lit0 & (col == BLUE)
-        if nb_.any():
-            cut = np.quantile(v[nb_], min(1.0, P.navy * lit0.sum() / nb_.sum()))
-            col[nb_ & (v <= cut) & (rng.random((H, W)) < 0.85)] = NAVY
-
-    if P.core_scatter > 0:   # a warm core is orange scattered through pink at half density, not a solid orange field
-        oz = (col == ORANGE) & body
-        # light sources (a flame, a lamp, a glowing flask) keep a dense bright core: small, near white, dark round them
-        hi_ = t > max(0.8, float(np.quantile(t[body], 0.99)))
-        n_, lab_, st_, cen_ = cv2.connectedComponentsWithStats(hi_.astype(np.uint8))
-        ring_ = cv2.GaussianBlur(t, (0, 0), 12)
-        emit = np.zeros((H, W), bool)
-        for i_ in range(1, n_):
-            if st_[i_, 4] < 0.01 * H * W and ring_[int(cen_[i_, 1]), int(cen_[i_, 0])] < 0.55:
-                emit |= lab_ == i_
-        emit = cv2.dilate(emit.astype(np.uint8), np.ones((9, 9), np.uint8)) > 0
-        oz &= ~emit
-        gy_, gx_ = np.mgrid[0:H, 0:W]
-        swap = oz & (((gx_ + gy_) % 2) == 1) & (rng.random((H, W)) < P.core_scatter)
-        col[swap] = SALMON
-        p = np.where(oz, np.minimum(p, P.core_max), p)
-        pk = (r > 3.4) & oz & (rng.random((H, W)) < 0.12)   # a handful of white at the very peak
-        col[pk] = WHITE
-    if P.emit > 0 and 'lum' in A:   # a light source: a dense white-orange core with a halo through green into blue
-        em_ = emitters(A)
-        if em_.any():
-            d_ = cv2.distanceTransform((~em_).astype(np.uint8), cv2.DIST_L2, 3)
-            R_ = P.emit_halo
-            R_ = max(R_, 1.5 * math.sqrt(em_.sum()))
-            din_ = cv2.distanceTransform(em_.astype(np.uint8), cv2.DIST_L2, 3)
-            ring_r = np.where(em_, 3.5 + 0.9 * np.clip(din_ / 4, 0, 1), 3.5 - 2.5 * np.clip(d_ / R_, 0, 1))   # white only deep inside, orange at its edge
-            up = ring_r > r + 0.3
-            cc = ramp[np.clip(np.floor(ring_r + 0.9 * (bayer(H, W) - 0.5) + 0.6 * (rng.random((H, W)) - 0.5)), 0, 4).astype(int)]
-            col[up] = cc[up]
-            p = np.where(em_, np.maximum(p, 0.8 + 0.15 * np.clip(din_ / 4, 0, 1)), np.maximum(p, P.emit * np.clip(1 - d_ / R_, 0, 1) ** 1.5))
-            r = np.maximum(r, ring_r * (d_ < R_))
-    # contours: thin continuous lines, each line one colour
-    l8 = (cv2.GaussianBlur(t, (0, 0), 2.0) * 255).astype(np.uint8)
-    gm = np.hypot(cv2.Sobel(l8, cv2.CV_32F, 1, 0), cv2.Sobel(l8, cv2.CV_32F, 0, 1))
-    hi = float(np.percentile(gm[a > 0.5], P.line_level * 100)) if (a > 0.5).any() else 100.0
-    contour = cv2.Canny(l8, max(4, hi * 0.35), max(8, hi)) > 0
-    n, lab = cv2.connectedComponents(contour.astype(np.uint8), connectivity=8)
-    pick = rng.choice(np.array([ORANGE, SALMON, WHITE, BLUE2, MAGENTA], np.uint8), n, p=[0.06, 0.06, 0.12, 0.61, 0.15])
-    contour &= rng.random((H, W)) < P.lines
-    p = np.where(contour, 1.0, p)
-    if P.line_local:   # each line takes the colour the ramp gives that spot: blue or violet in shadow, warm only in the light
-        loc = np.where(r[contour] < 1.6, np.where(rng.random(contour.sum()) < 0.75, BLUE2, MAGENTA), col[contour])
-        col[contour] = np.where(loc == WHITE, ORANGE, loc).astype(np.uint8)
-    else:
-        col[contour] = pick[lab[contour]]
-    # the rim: where the light meets the dark hardest (and round the figure), parallel lines a dot
-    # wide with a dot of black between, on the lit side: white and orange at the edge, then
-    # salmon, then purple, fading
-    if (a > 0.5).any():   # the strongest edges, thinned to a line a dot wide, so the rim is clean, not a smear
-        hr = float(np.percentile(gm[a > 0.5], P.rim_level * 100))
-        strong = cv2.Canny(l8, max(4, hr * 0.6), max(8, hr)) > 0
-    else:
-        strong = np.zeros_like(contour)
-    if not (a > 0.5).all():
-        m8 = (a > 0.5).astype(np.uint8)
-        lit_out = soft > np.percentile(soft[a > 0.5], 80)          # only where the outline is lit
-        strong |= ((m8 - cv2.erode(m8, np.ones((3, 3), np.uint8))) > 0) & lit_out
-        strong[[0, -1], :] = strong[:, [0, -1]] = False
-    d = cv2.distanceTransform((~strong).astype(np.uint8), cv2.DIST_L2, 3)
-    lit_side = ((t - cv2.GaussianBlur(t, (0, 0), 3)) > -0.02) & (a > 0.5)
-    yy, xx = np.mgrid[0:H, 0:W]
-    bright = cv2.GaussianBlur(t, (0, 0), 4)
-    bright = bright > (np.percentile(bright[a > 0.5], 55) if (a > 0.5).any() else 0.5)   # rims only where it's lit
-    near = lit_side & bright & (d < 2 * P.rim_lines)
-    if P.rim_breaks > 0:   # broken into stretches, not unbroken chains round every shape
-        fr = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 5)
-        near &= fr > np.quantile(fr, P.rim_breaks)
-    runs = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 1.5)   # colour in runs of a few dots
-    runs = np.argsort(np.argsort(runs, axis=None)).reshape(H, W) / runs.size
-    first = np.array([ORANGE, WHITE, SALMON, MAGENTA], np.uint8)[np.digitize(runs, [0.4, 0.45, 0.8])]
-    wide = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 15)
-    wide = np.clip(0.5 + (wide - wide.mean()) / (wide.std() + 1e-6) * 0.35, 0.15, 1)   # the rim's weight changes along it
-    rows = [(first, 1.0), (SALMON, 0.85), (MAGENTA, 0.6), (BLUE2, 0.4)]
-    for k in range(P.rim_lines):
-        line = near & (d >= 2 * k) & (d < 2 * k + 1)
-        gap = near & (d >= 2 * k + 1) & (d < 2 * k + 2)
-        c, dens = rows[min(k, 3)]
-        on = line & (rng.random((H, W)) < P.rim * dens * (wide if k else 1.6 * wide))
-        p = np.where(on, 1.0, np.where(line, 0.0, np.where(gap, 0.3 * p, p)))
-        col[on] = c[on] if isinstance(c, np.ndarray) else c
-        if P.rim_fill > 0 and k < 2:   # the inner gaps partly filled: the lines merge into a band, as the references' rims do
-            fill = gap & (rng.random((H, W)) < P.rim_fill * dens * wide)
-            p = np.where(fill, 1.0, p)
-            col[fill] = c[fill] if isinstance(c, np.ndarray) else c
-    if P.outline > 0 and not (a > 0.5).all():   # the unlit rest of the outline: a sparse, cool line
-        dark_out = ((m8 - cv2.erode(m8, np.ones((3, 3), np.uint8))) > 0) & ~lit_out & ~near
-        if P.outline_real:   # only where the picture has a real edge there, not just the mask's
-            gm_e = cv2.dilate(gm, np.ones((5, 5), np.uint8))
-            dark_out &= gm_e > np.percentile(gm[a > 0.5], 70)
-        dark_out[[0, -1], :] = dark_out[:, [0, -1]] = False
-        on = dark_out & (rng.random((H, W)) < P.outline * wide)
-        p = np.where(on, 1.0, p)
-        col[on] = np.where(runs[on] < 0.6, BLUE2, np.where(runs[on] < 0.85, MAGENTA, SALMON))
-    lit0 = thr < p
-
-    th0 = math.radians(P.angle + P.tilt)   # off the dot rows, or the flow bands along them
-    flick = np.where(rng.random((H, W)) < P.shimmer, rng.choice([-1, 1], (H, W)), 0).astype(np.float32)
-
-    # streams: bundles of parallel lines growing out of the figure from bright points, along the
-    # angle and away from the figure, their colour changing along them in runs; each grows out,
-    # holds, and draws back in once round the loop
-    inner = (a > 0.5).astype(np.uint8)
-    if 0 < inner.mean() < 0.97:       # a cut-out: from just inside its outline
-        din = cv2.distanceTransform(np.pad(inner, 1, constant_values=1), cv2.DIST_L2, 3)[1:-1, 1:-1]
-        edge0 = (din < 5) & (inner > 0)
-    else:                             # the whole picture: from its strongest edges
-        edge0 = gm > np.percentile(gm, 97)
-    seedw = (np.maximum(lit0, 0.3) * (0.15 + ts) ** 4 * edge0).astype(np.float32)   # from the brightest light
-    if P.drip:   # only where the figure ends below: its lower edges
-        ab0 = cv2.GaussianBlur(a, (0, 0), 3)
-        dn = np.zeros_like(ab0); dn[:-8] = ab0[8:]
-        seedw *= (ab0 - dn > 0.3) & lit0
-    srcs = seed_where(seedw, P.streams, rng)
-    nb = len(srcs)
-    th = math.radians(90 if P.drip else P.angle)
-    d0 = np.float32([math.cos(th), math.sin(th)])
-    ab = cv2.GaussianBlur(a, (0, 0), 6)
-    look = lambda q: ab[np.clip(np.round(q[:, 1]).astype(int), 0, H - 1), np.clip(np.round(q[:, 0]).astype(int), 0, W - 1)]
-    out_side = look(srcs + d0 * 12) - look(srcs - d0 * 12)
-    sign = np.ones(nb) if P.drip else np.where(np.abs(out_side) > 0.05, np.where(out_side > 0, -1, 1), rng.choice([-1, 1], nb) if P.both else 1)
-    bdv = (d0[None] * sign[:, None]).astype(np.float32)
-    nl = rng.integers(P.strands[0], P.strands[1] + 1, nb)
-    bi = np.repeat(np.arange(nb), nl)
-    k_in = np.concatenate([np.arange(k) for k in nl]) if nb else np.zeros(0, int)
-    perp = np.stack([-bdv[:, 1], bdv[:, 0]], 1)
-    lsrc = srcs[bi] + perp[bi] * (2.0 * (k_in - (nl[bi] - 1) / 2))[:, None] - bdv[bi] * rng.integers(0, 6, len(bi))[:, None]
-    ldv = bdv[bi]
-    L = (rng.integers(P.stream_len[0], P.stream_len[1] + 1, nb)[bi] * rng.uniform(0.6, 1, len(bi))).astype(np.float32)
-    ph = (rng.random(nb)[bi] + rng.uniform(0, 0.04, len(bi))).astype(np.float32)
-    # each line one colour, a quarter of its dots its neighbour on the ramp; most dotted every 5th dot
-    nbr = np.zeros(9, np.uint8)
-    for c0, c1 in ((BLUE, BLUE2), (BLUE2, GREEN), (GREEN, BLUE2), (ORANGE, SALMON), (SALMON, ORANGE),
-                   (WHITE, ORANGE), (MAGENTA, SALMON)):
-        nbr[c0] = c1
-    sx, sy = np.clip(srcs[bi, 0].astype(int), 0, W - 1), np.clip(srcs[bi, 1].astype(int), 0, H - 1)
-    base = col[sy, sx].copy()                                     # the colour of the light it leaves
-    base[(base >= ORANGE) & (rng.random(len(bi)) < 0.8)] = BLUE2  # mostly cool all the same
-    runs = np.where(rng.random((len(bi), P.stream_len[1] + 2)) < 0.25, nbr[base][:, None], base[:, None]).astype(np.uint8)
-    # dotted, never a solid bar, and never an even dot-gap-dot either: each line its own uneven spacing
-    gaps = rng.choice([1, 2, 3], (len(bi), P.stream_len[1] + 2), p=[0.3, 0.45, 0.25]).cumsum(1)
-    dotted = np.zeros((len(bi), P.stream_len[1] + 4), bool)
-    for k_ in range(gaps.shape[1]):
-        ok_ = gaps[:, k_] < dotted.shape[1]
-        dotted[np.nonzero(ok_)[0], gaps[ok_, k_]] = True
-    # the flow: a streaky field, periodic along the angle so it scrolls round in one loop
-    Lu, Lv = max(8, int(round(P.flow_speed * P.frames))), 256
-    fld = cv2.GaussianBlur(np.tile(rng.random((Lv, Lu)).astype(np.float32), (3, 3)), (0, 0), sigmaX=P.flow_len,
-                           sigmaY=P.flow_width)[Lv:2 * Lv, Lu:2 * Lu]   # tiled: it wraps round seamlessly
-    fld = (np.argsort(np.argsort(fld, axis=None)).reshape(fld.shape) / fld.size).astype(np.float32)  # flat 0..1
-    fld = np.clip((fld - 0.5) * 2.2 + 0.5, 0, 1)
-    fu = (xx * math.cos(th0) + yy * math.sin(th0)).astype(np.float32)
-    fv = (np.round(-xx * math.sin(th0) + yy * math.cos(th0)).astype(int)) % Lv
-    held = contour | (near & (d < 2 * P.rim_lines))          # lines and rims hold still
-    # it runs through texture (feathers, hair, folds), and only faintly over flat tone, where it
-    # would read as scanlines
-    tex = cv2.GaussianBlur(np.abs(hp), (0, 0), 4)
-    tex = np.clip(tex / (np.percentile(tex[a > 0.5], 80) + 1e-6 if (a > 0.5).any() else 1), 0, 1)
-    amp = (P.flow * 2 * (0.6 + 0.4 * tex)).astype(np.float32)
-    # sparks: short fully lit dashes sliding along through the lit parts, on the same scroll
-    f2 = cv2.GaussianBlur(np.tile(rng.random((Lv, Lu)).astype(np.float32), (3, 3)), (0, 0), sigmaX=7, sigmaY=0.5)[Lv:2 * Lv, Lu:2 * Lu]
-    spark = f2 > np.quantile(f2, 1 - P.sparks)
-    where_sp = (soft > (np.percentile(soft[a > 0.5], 85) if (a > 0.5).any() else 0.5)) & (a > 0.5)   # only the brightest
-
-    # stray specks in the black round the figure: dust off the light, mostly blue, now and then warm or white
-    spk = np.zeros((H, W), bool); spc = np.zeros((H, W), np.uint8)
-    if P.specks > 0 and lit0.any():
-        near_l = cv2.GaussianBlur(lit0.astype(np.float32), (0, 0), P.speck_reach)
-        wgt = near_l * (cv2.dilate(lit0.astype(np.uint8), np.ones((5, 5), np.uint8)) == 0)
-        pts = seed_where(wgt, int(P.specks * lit0.sum()), rng).astype(int)
-        spk[pts[:, 1], pts[:, 0]] = True
-        spc = rng.choice(np.array([BLUE, BLUE2, ORANGE, MAGENTA, SALMON, WHITE, GREEN], np.uint8), (H, W), p=[0.62, 0.22, 0.05, 0.04, 0.03, 0.01, 0.03])
-    out = np.zeros((P.frames, H, W), np.uint8)
-    for f in range(P.frames):
-        s = f / P.frames
-        if P.flow > 0:
-            m = 1 + amp * (fld[fv, np.round(fu - P.flow_speed * f).astype(int) % Lu] - 0.5)
-            pf = np.where(held, p, p * m)
-            if P.sparks > 0:
-                pf = np.maximum(pf, 0.9 * (spark[fv, np.round(fu - P.flow_speed * f).astype(int) % Lu] & where_sp))
-        else:
-            pf = p
-        th_f = np.mod(thr + flick * s, 1)
-        if P.twinkle > 0:   # a few dots each frame take a fresh threshold: the light glitters
-            tw = (rng.random((H, W)) < P.twinkle * (1 - hot)) & ~held & (p > 0.1)   # only where there is light
-            th_f = np.where(tw, rng.random((H, W)), th_f)
-        lit = (th_f < pf) | (hot_solid if hot_solid_kill is None else hot_solid & ~hot_solid_kill)
-        img = np.where(lit, col, 0).astype(np.uint8)
-        if spk.any():
-            sp_f = spk & (rng.random((H, W)) < 0.85)   # they wink in and out
-            img = np.where(sp_f & (img == 0), spc, img)
-        u = np.mod(ph + s, 1)
-        grow = np.clip(np.minimum(u * 3, (1 - u) * 3), 0, 1) * L      # out, hold, back in
-        for j in range(P.stream_len[1]):
-            on = (j < grow) & dotted[:, j]
-            plot(img, (lsrc + ldv * j)[on], runs[on, j])
-        out[f] = img
-    return out, pal
+    rgba = A['rgba']
+    v0 = light(rgba)
+    v = np.clip(exposed(v0, P) * P.gain, 0, 1)
+    if P.lines:
+        v = v + P.lines * (v - cv2.GaussianBlur(v, (0, 0), 1.2))
+    v = np.clip((v - P.black) / (P.white - P.black), 0, 1) ** P.gamma
+    near = cv2.GaussianBlur(v, (0, 0), P.bloom_size)
+    heat = v * (1 + P.bloom * near) + P.halo * near
+    if P.source:
+        # the source heats the light that is there, in proportion: the surface's detail stays, nothing fills flat
+        near_source = source(rgba, v0, P)
+        heat = heat * (1 + P.source * near_source) \
+            + P.source_spill * P.source * near_source
+    heat = np.clip(heat, 0, 1)
+    xs = np.array([s for s, _ in P.ramp], np.float32)
+    cs = np.array([c for _, c in P.ramp], np.float32)
+    target = np.stack([np.interp(heat, xs, cs[:, k]) for k in range(3)], -1).astype(np.float32)
+    picks, cell = knoll(target, GLOW_PALETTE, P.spread)
+    return animate(picks, cell, heat.shape, P, seed), GLOW_PALETTE.astype(np.uint8)
 
 
 # ---- streak
@@ -1497,21 +1116,18 @@ TUNE = {'exposure': (0.3, 3.0), 'highlights': (0.0, 3.0), 'warmth': (0.0, 3.0)} 
 def tune(P, t: dict | None):
     """Hand controls on top of a style's settings, each 1 (or absent) for no change: exposure (more or
     less light), highlights (how big and dense the brightest light gets), warmth (glow: how much of
-    the light turns warm), focus ((x, y), 0..1 of the frame: glow's light gathers there)."""
+    the light turns warm), focus ((x, y), 0..1 of the frame: glow's light source is put there)."""
     t = t or {}
     e, h, w = (float(t.get(k, 1.0)) for k in ('exposure', 'highlights', 'warmth'))
-    P.gain *= e
+    P.gain *= e ** 0.6 if isinstance(P, Glow) else e   # glow's light is cut by a black point: a gentler hand
     if isinstance(P, Glow):
-        P.lit_mass, P.lit_floor, P.core_halo = P.lit_mass * h, P.lit_floor * h, P.core_halo * h
-        P.hot = P.hot * h
-        P.skin_share *= w
-        P.warmth *= w
-        r = list(P.ramp)   # more or less of the light reaches orange and white
-        r[3] = min(0.995, 1 - (1 - r[3]) * w)
-        r[4] = min(0.999, max(r[3] + 0.002, 1 - (1 - r[4]) * w))
-        P.ramp = tuple(r)
+        P.white = P.black + (P.white - P.black) / max(h, 0.25) ** 0.5   # more of the light reaches the top of the ramp
+        P.bloom *= h
+        P.source *= w
+        top = P.ramp[-1][0]   # the warm end of the ramp starts lower, or higher
+        P.ramp = tuple((s if s <= P.warm_from else max(P.warm_from + 0.01, top - (top - s) * w), c) for s, c in P.ramp)
         if t.get('focus') is not None:
-            P.focus_xy = (float(t['focus'][0]), float(t['focus'][1]))
+            P.source_xy = (float(t['focus'][0]), float(t['focus'][1]))
     elif isinstance(P, Dust):
         P.core *= h
     elif isinstance(P, Streak):
@@ -1533,10 +1149,9 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
         P.frames = frames
     if colour and isinstance(P, (Streak, Dust)):
         P.colour = colour if colour.startswith('#') else COLOURS.get(colour, P.colour)
-    if angle is not None and isinstance(P, (Glow, Dust)):
+    if angle is not None and isinstance(P, Dust):
         P.angle = angle
-        if isinstance(P, Dust):   # a direction asked for is kept: no turning round to spare the lit side
-            P.spare_lit = False
+        P.spare_lit = False   # a direction asked for is kept: no turning round to spare the lit side
     return P
 
 
@@ -1560,7 +1175,7 @@ def main() -> None:
     ap.add_argument('--fps', type=int)
     ap.add_argument('--cutout', action='store_true', help='cut the figure out (GrabCut) first')
     ap.add_argument('--colour', help='streak, dust: the colour (hex, or ' + ', '.join(COLOURS) + ')')
-    ap.add_argument('--angle', type=float, help='glow, dust: which way the streams or the dust go (degrees, 0 right, 90 down)')
+    ap.add_argument('--angle', type=float, help='dust: which way the dust goes (degrees, 0 right, 90 down)')
     ap.add_argument('--flat', action='store_true', help='dust: one flat grey, no shades or haze')
     ap.add_argument('--seed', type=int, help='default: one from the picture')
     ap.add_argument('--out', type=Path, help='default out/<picture>/fx')

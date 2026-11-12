@@ -777,7 +777,7 @@ function setMode(m: Mode): void {
   $('live-bar').classList.toggle('off', !live || !st.map);
   $('fx-bar').classList.toggle('off', live || !st.map);
   $('fx-colours').hidden = m === 'live' || m === 'glow';
-  $('fx-angle').hidden = m !== 'dust';   // glow's streams are drips: they fall straight down
+  $('fx-angle').hidden = m !== 'dust';   // only dust has a direction
   $('fx-tone').hidden = m !== 'dust';
   $('tu-warmth-l').hidden = m !== 'glow';
   $('tu-focus').hidden = m !== 'glow';
