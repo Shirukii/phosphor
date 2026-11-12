@@ -190,6 +190,7 @@ class Glow:
     solid: float = 0.2          # share of the figure lit near solid (picks the curve per picture; 0: use gamma)
     gamma: float = 3.0          # tone curve (higher: the shade empties out more)
     fill: float = 0.65          # the densest the dots get outside the brightest light
+    grain: float = 0.2          # share of the hot core's dots turned white (and half that magenta)
     halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
     feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
@@ -318,6 +319,12 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     col = ramp[np.clip(np.floor(r + P.mix * (bayer(H, W) - 0.5)), 0, 4).astype(int)]   # zones, checkered where they meet
     col[(col == BLUE2) & (r < 1.2 + P.mix) & (rng.random((H, W)) < 0.5)] = BLUE   # the two blues mingle
     col[(rng.random((H, W)) < P.fringe * dark_side)] = MAGENTA          # purple just off bright edges
+    if P.grain > 0:   # the hot core's orange grained with white and a little magenta, not clean bands
+        gr = rng.random((H, W))
+        core_o = (hot > 0.5) & (col >= GREEN) & (col != MAGENTA)
+        col[core_o & (gr < P.grain)] = WHITE
+        col[core_o & (gr >= P.grain) & (gr < 1.5 * P.grain)] = MAGENTA
+        col[core_o & (col == GREEN) & (gr > 1 - P.grain)] = ORANGE   # less green inside it
 
     # contours: thin continuous lines, each line one colour
     l8 = (cv2.GaussianBlur(t, (0, 0), 2.0) * 255).astype(np.uint8)
@@ -652,7 +659,7 @@ class Dust:
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
     thick: float = 0.35         # share of motes two dots thick
-    jitter: float = 25.0        # how far each mote's heading strays from its lane's (degrees, typical)
+    jitter: float = 18.0        # how far each mote's heading strays from its lane's (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
     comb: float = 0.6           # how far the flecks lie along the drift, not the shapes, inside the figure
 
@@ -747,7 +754,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         jn = cv2.GaussianBlur(rng.normal(0, 1, (H, W)).astype(np.float32), (0, 0), 15)   # smooth: neighbours run together
         jn = jn / (jn.std() + 1e-6) * math.radians(P.jitter)
         q = np.clip(np.round(m0).astype(int), 0, [W - 1, H - 1])
-        ja = (jn[q[:, 1], q[:, 0]] + rng.normal(0, math.radians(P.jitter) * 0.3, n)).astype(np.float32)
+        ja = (jn[q[:, 1], q[:, 0]] + rng.normal(0, math.radians(P.jitter) * 0.15, n)).astype(np.float32)
         c, s_ = np.cos(ja)[:, None], np.sin(ja)[:, None]
         mv = np.concatenate([mv[:, :1] * c - mv[:, 1:] * s_, mv[:, :1] * s_ + mv[:, 1:] * c], 1)
     perp = np.float32([-dv[1], dv[0]])
