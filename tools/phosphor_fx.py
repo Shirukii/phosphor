@@ -517,6 +517,7 @@ class Streak:
     even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
     jitter: float = 0.6         # threshold shake in the dither: maze-like chains, not stripes and checks
     clump: float = 0.8          # in the brightest, holes from noise blurred this much (dots): loose pairs, not a grid
+    plane: int = 120            # the least dots a patch of bright light needs to go near solid
     hold: float = 0.5           # share of the figure's dots held from one dither all loop (less boil)
     boil: float = 0.05          # noise added before each frame's dither: how much it boils
     stray: float = 0.0          # how much of that noise is let into the background
@@ -617,6 +618,12 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
     hold_m = rng.random((P.frames, H, W)) < P.hold if P.hold > 0 else None
     busy = np.clip(cv2.GaussianBlur(tt, (0, 0), 6) * 3, 0, 1)        # where the figure is lit and dense
 
+    big_light = np.zeros((H, W), bool)
+    if P.clump > 0:   # solid only on broad planes of light: small bright islands stay dithered
+        bl = (cv2.GaussianBlur(tt, (0, 0), 1.5) > 0.78 * P.most).astype(np.uint8)
+        nb_, lab_, st_, _ = cv2.connectedComponentsWithStats(bl, connectivity=8)
+        keep = st_[:, 4] >= P.plane; keep[0] = False
+        big_light = cv2.dilate((keep[lab_]).astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
     out = np.zeros((P.frames, H, W), np.uint8)
     for f in range(P.frames):
         s = f / P.frames
@@ -630,7 +637,7 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         if P.clump > 0:   # the brightest: holes from lightly clumped noise, in pairs and short runs, not a lattice
             cn = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), P.clump)
             cn = (np.argsort(np.argsort(cn, axis=None)).reshape(H, W) / cn.size).astype(np.float32)
-            dense = tt > P.most * (0.74 + 0.12 * rng.random((H, W)))   # its edge ragged, not a contour
+            dense = (tt > P.most * (0.74 + 0.12 * rng.random((H, W)))) & big_light   # its edge ragged, not a contour
             bits = np.where(dense, cn < np.clip(tt / P.most, 0, 1) * 0.9, bits)
         if P.hold > 0:   # some of the figure holds still all loop: it shimmers rather than boils
             if f == 0:
@@ -707,13 +714,14 @@ class Dust:
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
     specks_glint: int = 40      # small glints out in the drift, each twinkling for part of the loop
-    mote_len: tuple[int, int] = (2, 6)  # dots in a mote: a short dash along its way
+    mote_len: tuple[int, int] = (2, 14)  # dots in a mote, least and most: a short dash along its way
+    mote_tail: float = 0.3      # how quickly long motes get rare (geometric: lower, more long ones)
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
     thick: float = 0.2          # share of motes two dots thick
     lanes: float = 0.7          # how much the motes gather in lanes along the drift (0: evenly)
     jitter_size: float = 15.0   # how wide the regions are that stray together (dots)
-    jitter: float = 18.0        # how far each mote's heading strays from its lane's (degrees, typical)
+    jitter: float = 11.0        # how far each mote's heading strays from its lane's (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
     comb: float = 0.6           # how far the flecks lie along the drift, not the shapes, inside the figure
 
@@ -824,9 +832,9 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         mv = np.concatenate([mv[:, :1] * c - mv[:, 1:] * s_, mv[:, :1] * s_ + mv[:, 1:] * c], 1)
     perp = np.float32([-dv[1], dv[0]])
     mph = rng.random(n).astype(np.float32)
-    mlen = rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n, p=None) if P.mote_len[1] > P.mote_len[0] else np.full(n, P.mote_len[0])
-    mlen = np.minimum(mlen, rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n))   # short ones the most
-    mlev = np.full(n, NL - 2)   # one mid grey, under the figure's highlights: the drift never upstages the face
+    mlen = np.minimum(P.mote_len[0] - 1 + rng.geometric(P.mote_tail, n), P.mote_len[1])   # mostly short, a long tail of long ones
+    mlev = np.full(n, NL - 2)   # a mid grey, under the figure's highlights: the drift never upstages the face
+    mhead = rng.random(n) < 0.5   # but half of them lead with a bright dot, as the references' sweep does
     thick = rng.random(n) < P.thick
     blob = rng.random(n) < P.blobs * many / max(n, 1)
     bdots = rng.uniform(-3.5, 3.5, (n, 12, 2)).astype(np.float32)   # a blob: a loose round cluster
@@ -900,7 +908,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         side = np.stack([-vel[:, 1], vel[:, 0]], 1)
         for j in range(P.mote_len[1]):
             on = vis & (j < mlen) & ~blob
-            mj = np.where(j >= mlen - 1 - (mlen > 3), np.maximum(ml.astype(int) - 1, 1), ml).astype(np.uint8)   # the tail a step dimmer
+            mj = np.where(j >= mlen - 1 - (mlen > 3), np.maximum(ml.astype(int) - 1, 1), ml)   # the tail a step dimmer
+            mj = np.where((j == 0) & mhead & (ml > 0), np.minimum(ml.astype(int) + 1, NL), mj).astype(np.uint8)   # the head a step brighter
             plot(img, (pos - vel * j)[on], mj[on])
             on2 = on & thick
             plot(img, (pos - vel * j + side)[on2], ml[on2])   # some two dots thick
