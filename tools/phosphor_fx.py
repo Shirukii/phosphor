@@ -191,6 +191,7 @@ class Glow:
     gamma: float = 3.0          # tone curve (higher: the shade empties out more)
     fill: float = 0.65          # the densest the dots get outside the brightest light
     hot_fill: float = 0.9       # how solid the hot core is
+    feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
     hot: float = 0.05           # share of the figure, its brightest broad light, coloured in calm bands
     core: float = 0.05          # share of the figure, its brightest, that may go near solid
     most: float = 0.95          # the densest the dots get: the brightest light near solid
@@ -291,18 +292,22 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     zone = cv2.GaussianBlur(ts, (0, 0), P.zones)
     hot = zone > (np.quantile(zone[body], 1 - P.hot) if body.any() else 2)   # the hot core: calm, banded colour
     hot = cv2.GaussianBlur(hot.astype(np.float32), (0, 0), 2)
+    lift = 0.0
     if body.any():   # the core near solid, if the light has one: evenly lit line art has none
         q50, q95 = np.quantile(zone[body], [0.5, 0.95])
         lift = float(np.clip(((q95 - q50) / (q50 + 0.05) - 0.3) / 0.25, 0, 1))
-        g1 = cv2.GaussianBlur(t, (0, 0), 1.0)
-    gmag = np.hypot(cv2.Sobel(g1, cv2.CV_32F, 1, 0), cv2.Sobel(g1, cv2.CV_32F, 0, 1))
-    feat = gmag > (np.percentile(gmag[body], 90) if body.any() else 1)   # eyes, mouth, folds inside the core
+    # features (eyes, nostrils, mouth, folds): small spots darker than round them, not striations
+    k = max(3, int(round(0.015 * max(H, W))) | 1)
+    th = cv2.morphologyEx(cv2.GaussianBlur(t, (0, 0), 1.0), cv2.MORPH_BLACKHAT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    fl = np.percentile(th[body], 92) if body.any() else 1
+    feat = (th > max(fl, 0.03)) & body & (A['coh'] < 0.7)
+    p = np.where(feat & ~(hot > 0.5), np.maximum(p, P.feat_fill * np.clip(soft * 4, 0, 1)), p)   # drawn, not holes
     p = np.where((hot > 0.5) & body & ~feat, np.maximum(p, P.hot_fill * lift), p)
     if P.hot_fill * lift > 0.85:   # no holes in a solid core, but its features show through
         hot_solid = (hot > 0.6) & body & ~feat
     else:
         hot_solid = np.zeros_like(body)
-    v = zone - 0.25 * (feat & (hot > 0.5)) + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
+    v = zone - 0.25 * feat + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
     lit0 = thr < p
     anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
     r = np.interp(v, np.maximum.accumulate(anchors + np.arange(5) * 1e-6), np.arange(5))
@@ -456,6 +461,8 @@ class Streak:
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
+    features: float = 1.0       # how much darker small dark spots (eyes, mouth) go before the dither
+    rim: float = 0.15           # light added along the inside of the silhouette, so it holds
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
     even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
     jitter: float = 0.6         # threshold shake in the dither: maze-like chains, not stripes and checks
@@ -514,6 +521,14 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
     tt = (np.where(tt < P.floor, 0, tt) * P.most).astype(np.float32)
     if P.smooth > 0:   # the source's fine grain out first, or the diffusion draws it as blotches
         tt = cv2.GaussianBlur(tt, (0, 0), P.smooth)
+    if P.features > 0:   # eyes, nostrils, mouth: small dark spots go darker, so they read as holes
+        k = max(3, int(round(0.03 * max(H, W))) | 1)
+        th = cv2.morphologyEx(tt, cv2.MORPH_BLACKHAT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        tt = np.clip(tt - P.features * th, 0, 1).astype(np.float32)
+    if P.rim > 0 and 0.02 < (a > 0.5).mean() < 0.97:   # the silhouette diffuses solid, not frayed
+        m = (a > 0.5).astype(np.uint8)
+        band = (m - cv2.erode(m, np.ones((3, 3), np.uint8))).astype(bool) & (tt > 0.1)
+        tt = np.where(band, np.minimum(tt + P.rim, P.most), tt).astype(np.float32)
     shade = (1 + (tt > 0.42 * P.most) + (tt > 0.72 * P.most)).astype(np.uint8) if P.shades > 1 else np.full((H, W), 3, np.uint8)
     # the boil only where there's light (and a `stray` share of it anywhere): black stays black,
     # cut out or not
@@ -612,7 +627,7 @@ class Dust:
     clump: float = 0.0          # how much the specks clump (0: even white noise)
     outline: float = 0.6        # how much of the silhouette and strongest edges is drawn as bright strokes
     shade_lev: float = 0.6      # how far each speck's grey follows the light (0: any grey)
-    order: float = 0.9          # how much of the body is an ordered (Bayer) dither, not noise: crisper shading
+    order: float = 0.85         # how much of the body is an ordered (Bayer) dither, not noise: crisper shading
     edges: float = 0.35         # specks gathering on the outline (and less, the edges inside)
     flecks: int = 5000          # short flecks, placed afresh each frame (counts are for 540x540)
     fleck_len: tuple[int, int] = (2, 3)
