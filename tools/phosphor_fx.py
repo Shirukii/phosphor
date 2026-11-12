@@ -774,6 +774,8 @@ class Dust:
     specks_glint: int = 40      # small glints out in the drift, each twinkling for part of the loop
     haze: float = 0.12          # faint dark-grey dots round the lit ones (0: none)
     flat: bool = False          # one flat grey for everything (no shades, no haze), as some dust art is
+    checker: float = 0.25       # flat only: share of the mid-tone body drawn as patches of checkerboard dither
+    checker_from: float = 0.2   # the local speck density where mid tones start (share of dots lit, 9x9)
     mote_len: tuple[int, int] = (2, 14)  # dots in a mote, least and most: a short dash along its way
     mote_tail: float = 0.3      # how quickly long motes get rare (geometric: lower, more long ones)
     falloff: float = 1.5        # how fast motes thin out as they go
@@ -839,6 +841,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     many = H * W / 540 ** 2                                  # the counts, for this size
 
     bay = bayer(H, W)
+    ck = (np.add.outer(np.arange(H), np.arange(W)) % 2 == 0)
     k8 = np.ones((3, 3), np.float32); k8[1, 1] = 0
     strong_ed = (ed > np.percentile(ed[a > 0.5], 97)) & (sw < 0.5) if (a > 0.5).any() else np.zeros_like(a, bool)
     rim = ((sil > 0.5) | strong_ed) & (a > 0.3)   # the outline holds even where the figure comes apart
@@ -949,6 +952,14 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             k4_ = np.float32([[0, 1, 0], [1, 0, 1], [0, 1, 0]])   # none at its sides: alone, or only touching at a corner
             alone = lit & (cv2.filter2D(lit.astype(np.uint8), -1, k4_, borderType=cv2.BORDER_CONSTANT) == 0) & (rng.random((H, W)) < P.lone)
             lit &= ~alone
+        if P.flat and P.checker > 0:   # mid tones in patches of checkerboard, as flat dust art dithers them
+            ld = cv2.blur(lit.astype(np.float32), (9, 9))
+            pn = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 3)
+            mid = (ld > P.checker_from) & (ld < 0.6) & inner
+            cz = mid & (pn > np.quantile(pn[mid], 1 - P.checker)) if mid.any() else mid
+            cz &= rng.random((H, W)) < 0.92   # a few gaps: worn, not printed
+            lit = np.where(cz, ck, lit)
+            lev = np.where(cz, NL, lev)
         img = np.where(lit, lev, 0).astype(np.uint8)
         # flecks along the shapes, mostly in the lit and on edges
         wf = (A['edge'] * A['coh'] * tt + 0.3 * tt) * dens

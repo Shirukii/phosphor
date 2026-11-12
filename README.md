@@ -95,7 +95,7 @@ writes `out/picture/fx/glow.gif`, `glow.webp`, `glow/0000.png`… and the same f
 picture with transparency is taken as cut out already; `--cutout` cuts any other one out, and
 without either the whole picture is used. `--style`, `--long` (dots across the longer side: glow
 540, streak 270, dust 540), `--aspect` (`WxH`, default `1x1`), `--scale` (px per dot in the files:
-glow 2, streak 4, dust 2), `--frames`, `--fps`, `--angle` (glow, dust), `--colour` (streak, dust), `--flat` (dust: one flat grey, no shades or haze),
+glow 2, streak 4, dust 2), `--frames`, `--fps`, `--angle` (glow, dust), `--colour` (streak, dust), `--flat` (dust: one flat grey, no shades or haze, mid-tones in patches of checkerboard),
 `--seed` (by default one from the picture, so the same picture always comes out the same). All three
 work best on detailed, lit pictures: the edges and the light are what they draw.
 
