@@ -516,6 +516,7 @@ class Streak:
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
     even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
     jitter: float = 0.6         # threshold shake in the dither: maze-like chains, not stripes and checks
+    clump: float = 0.8          # in the brightest, holes from noise blurred this much (dots): loose pairs, not a grid
     hold: float = 0.5           # share of the figure's dots held from one dither all loop (less boil)
     boil: float = 0.05          # noise added before each frame's dither: how much it boils
     stray: float = 0.0          # how much of that noise is let into the background
@@ -531,7 +532,7 @@ class Streak:
     rain_gaps: float = 0.35     # gaps in a streak (0: solid): dotted, broken runs
 
 
-def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None) -> np.ndarray:
+def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None, hold_j: float = 0.0) -> np.ndarray:
     """Floyd-Steinberg error diffusion, serpentine (each row the other way), so the dots run no
     one way: plain left-to-right scanning spaces them out across and stacks them up and down.
     `jitter` shakes the threshold, which breaks up the stripes and checks it settles into at mid grey."""
@@ -540,7 +541,7 @@ def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None) -> np.ndarray:
     e[:H, 1:W + 1] = img
     rows = e.tolist()
     th = 0.5 + jitter * (rng.random((H, W + 2)) - 0.5) if jitter > 0 else np.full((H, W + 2), 0.5)
-    th[:, 1:W + 1] = np.where(img > 0.8, 0.5, th[:, 1:W + 1])   # the brightest steady: solid with even pinholes
+    th[:, 1:W + 1] = np.where(img > 0.8, 0.5 + hold_j * (th[:, 1:W + 1] - 0.5), th[:, 1:W + 1])   # the brightest calmer: solid, its pinholes loose, not a grid
     th = th.tolist()
     out = np.zeros((H, W), bool)
     for y in range(H):
@@ -626,6 +627,11 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         bits = diffuse(np.ascontiguousarray(nz), P.jitter, rng)
         bits = bits[:, ::-1] if o & 1 else bits
         bits = bits.T if o & 2 else bits
+        if P.clump > 0:   # the brightest: holes from lightly clumped noise, in pairs and short runs, not a lattice
+            cn = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), P.clump)
+            cn = (np.argsort(np.argsort(cn, axis=None)).reshape(H, W) / cn.size).astype(np.float32)
+            dense = tt > P.most * (0.74 + 0.12 * rng.random((H, W)))   # its edge ragged, not a contour
+            bits = np.where(dense, cn < np.clip(tt / P.most, 0, 1) * 0.9, bits)
         if P.hold > 0:   # some of the figure holds still all loop: it shimmers rather than boils
             if f == 0:
                 base = bits.copy()
@@ -820,7 +826,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     mph = rng.random(n).astype(np.float32)
     mlen = rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n, p=None) if P.mote_len[1] > P.mote_len[0] else np.full(n, P.mote_len[0])
     mlen = np.minimum(mlen, rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n))   # short ones the most
-    mlev = np.full(n, NL - 1)   # one grey, a step under white: crisp, not smudge
+    mlev = np.full(n, NL - 2)   # one mid grey, under the figure's highlights: the drift never upstages the face
     thick = rng.random(n) < P.thick
     blob = rng.random(n) < P.blobs * many / max(n, 1)
     bdots = rng.uniform(-3.5, 3.5, (n, 12, 2)).astype(np.float32)   # a blob: a loose round cluster
@@ -894,7 +900,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         side = np.stack([-vel[:, 1], vel[:, 0]], 1)
         for j in range(P.mote_len[1]):
             on = vis & (j < mlen) & ~blob
-            plot(img, (pos - vel * j)[on], ml[on])
+            mj = np.where(j >= mlen - 1 - (mlen > 3), np.maximum(ml.astype(int) - 1, 1), ml).astype(np.uint8)   # the tail a step dimmer
+            plot(img, (pos - vel * j)[on], mj[on])
             on2 = on & thick
             plot(img, (pos - vel * j + side)[on2], ml[on2])   # some two dots thick
         bi = np.nonzero(blob & vis)[0]
@@ -923,9 +930,10 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         for (gx_, gy_), gp, ga, gl in zip(gpos, gph, garm, glev):   # after the crumbs go: they are tiny
             ph_ = np.mod(s - gp, 1)
             if ph_ < 0.35:
-                arm = 1 if ph_ < 0.07 or ph_ > 0.28 else int(ga)
-                pts = [(gx_, gy_)] + [(gx_ + d * j, gy_) for d in (-1, 1) for j in range(1, arm + 1)] + [(gx_, gy_ + d * j) for d in (-1, 1) for j in range(1, arm + 1)]
-                plot(img, np.float32(pts), np.uint8([int(gl) + 1] + [int(gl)] * (len(pts) - 1)))
+                # a soft puff: a bright dot in a loose ring of dimmer greys, a 3x3 at its height
+                big = 0.07 <= ph_ <= 0.28
+                pts = [(gx_, gy_)] + [(gx_ + ox, gy_ + oy) for ox in (-1, 0, 1) for oy in (-1, 0, 1) if (ox or oy) and (big or ox == 0 or oy == 0) and rng.random() < 0.75]
+                plot(img, np.float32(pts), np.uint8([int(gl)] + [int(rng.integers(2, int(gl))) for _ in pts[1:]]))
         out[f] = img
     return out, pal
 
