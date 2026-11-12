@@ -323,6 +323,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         core_o = (hot > 0.5) & (col >= GREEN) & (col != MAGENTA)
         gy, gx = np.mgrid[0:H, 0:W]
         lat = ((gx % 2) == 1) & ((gy % 2) == 1)
+        col[(hot > 0.6) & (col == WHITE) & ~lat] = ORANGE   # in the core, white only on the lattice: no runs
         col[core_o & lat & (rng.random((H, W)) < P.grain * 4 * hot)] = WHITE
         col[(hot > 0.6) & (col == MAGENTA) & (dark_side == 0)] = ORANGE
 
@@ -640,6 +641,7 @@ class Dust:
     most: float = 0.55          # the densest the specks get, in the brightest light
     clump: float = 0.0          # how much the specks clump (0: even white noise)
     outline: float = 0.6        # how much of the silhouette and strongest edges is drawn as bright strokes
+    pair: float = 0.6           # share of lone body specks given a neighbour along the shapes
     shade_lev: float = 0.6      # how far each speck's grey follows the light (0: any grey)
     order: float = 0.85         # how much of the body is an ordered (Bayer) dither, not noise: crisper shading
     edges: float = 0.35         # specks gathering on the outline (and less, the edges inside)
@@ -773,6 +775,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     fdir = (P.comb + (1 - P.comb) * sw)[..., None] * dv + ((1 - P.comb) * (1 - sw))[..., None] * fdir   # combed by the drift where it comes apart
     fdir /= np.linalg.norm(fdir, axis=-1, keepdims=True) + 1e-6
 
+    fstep = np.round(np.stack([A['tx'], A['ty']], -1) * 1.2).astype(int)   # the neighbouring dot along the shapes
+    fstep[(fstep[..., 0] == 0) & (fstep[..., 1] == 0)] = (1, 0)
     spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
     sph, sln = rng.random(len(spk)), rng.integers(2, 7, len(spk))   # a few long-armed, most small
     sln = np.minimum(sln, rng.integers(2, 7, len(spk)))
@@ -791,6 +795,14 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             stroke = rim & (rng.random((H, W)) < P.outline * (1 - 0.8 * sw))   # thinning where the figure comes apart
             lit |= stroke
             lev = np.where(stroke, NL - rng.integers(0, 2, (H, W)), lev)
+        if P.pair > 0:   # lone body specks move next to a neighbour along the shapes: short dashes, not a checker mesh
+            k4 = np.float32([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
+            lone = lit & (cv2.filter2D(lit.astype(np.uint8), -1, k4, borderType=cv2.BORDER_CONSTANT) == 0) & (rng.random((H, W)) < P.pair)
+            ly, lx = np.nonzero(lone)
+            ty_, tx_ = np.clip(ly + fstep[ly, lx, 1], 0, H - 1), np.clip(lx + fstep[ly, lx, 0], 0, W - 1)
+            lit[ly, lx] = False   # moved, not added: the same light
+            lit[ty_, tx_] = True
+            lev[ty_, tx_] = lev[ly, lx]
         img = np.where(lit, lev, 0).astype(np.uint8)
         # flecks along the shapes, mostly in the lit and on edges
         wf = (A['edge'] * A['coh'] * tt + 0.3 * tt) * dens
@@ -833,6 +845,11 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
                 arm = max(1, int(round(sl * math.sin(math.pi * ph_ / 0.5))))
                 pts = [(sx, sy)] + [(sx + d * j, sy) for d in (-1, 1) for j in range(1, arm + 1)] + [(sx, sy + d * j) for d in (-1, 1) for j in range(1, arm + 1)]
                 lv8 = [NL] + [NL - 1] * (len(pts) - 1)
+                pa = np.round(np.float32(pts)).astype(int)
+                ok_ = (pa[:, 0] >= 1) & (pa[:, 0] < W - 1) & (pa[:, 1] >= 1) & (pa[:, 1] < H - 1)
+                for ox in (-1, 0, 1):   # a black ring round it, so it stands out of the body
+                    for oy in (-1, 0, 1):
+                        img[pa[ok_, 1] + oy, pa[ok_, 0] + ox] = 0
                 plot(img, np.float32(pts), np.uint8(lv8))
         if not off_near.all():   # off the figure, no lone crumbs: only dashes and blobs
             n_, lab, st, _ = cv2.connectedComponentsWithStats((img > 0).astype(np.uint8), connectivity=8)
