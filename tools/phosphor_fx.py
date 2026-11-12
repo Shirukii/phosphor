@@ -190,7 +190,7 @@ class Glow:
     solid: float = 0.2          # share of the figure lit near solid (picks the curve per picture; 0: use gamma)
     gamma: float = 3.0          # tone curve (higher: the shade empties out more)
     fill: float = 0.65          # the densest the dots get outside the brightest light
-    halo: float = 0.2           # sparse dots over the mid-tones, so the shade fades out
+    halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
     feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
     hot: float = 0.05           # share of the figure, its brightest broad light, coloured in calm bands
@@ -744,14 +744,17 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     swob = rng.random(k).astype(np.float32) * 6.283           # and a slow wave across the way they go
     mv, far, bend, wob = sv[who], sfar[who], sbend[who], swob[who]
     if P.jitter > 0:   # each its own heading, a little off its lane's: not blinds
-        ja = rng.normal(0, math.radians(P.jitter), n).astype(np.float32)
+        jn = cv2.GaussianBlur(rng.normal(0, 1, (H, W)).astype(np.float32), (0, 0), 15)   # smooth: neighbours run together
+        jn = jn / (jn.std() + 1e-6) * math.radians(P.jitter)
+        q = np.clip(np.round(m0).astype(int), 0, [W - 1, H - 1])
+        ja = (jn[q[:, 1], q[:, 0]] + rng.normal(0, math.radians(P.jitter) * 0.3, n)).astype(np.float32)
         c, s_ = np.cos(ja)[:, None], np.sin(ja)[:, None]
         mv = np.concatenate([mv[:, :1] * c - mv[:, 1:] * s_, mv[:, :1] * s_ + mv[:, 1:] * c], 1)
     perp = np.float32([-dv[1], dv[0]])
     mph = rng.random(n).astype(np.float32)
     mlen = rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n, p=None) if P.mote_len[1] > P.mote_len[0] else np.full(n, P.mote_len[0])
     mlen = np.minimum(mlen, rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n))   # short ones the most
-    mlev = rng.integers(NL - 1, NL + 1, n)   # the top two greys: crisp, not smudge
+    mlev = np.full(n, NL - 1)   # one grey, a step under white: crisp, not smudge
     thick = rng.random(n) < P.thick
     blob = rng.random(n) < P.blobs * many / max(n, 1)
     bdots = rng.uniform(-3.5, 3.5, (n, 12, 2)).astype(np.float32)   # a blob: a loose round cluster
