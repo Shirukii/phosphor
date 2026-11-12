@@ -10,6 +10,8 @@ continuous picture onto the palette, not dots placed by rule. So:
   drawn  -> a tonal picture (a photo, a painting) is first drawn: its contours as lines one dot
             wide, and of its surfaces only the lit planes; inside, the shade is black
   heat   -> light, plus a soft bloom of it (dense or bright places run hotter)
+  source -> one light source is found (the most compact strong light, by brightness or by
+            colour strength, off the frame's edge) and runs hot, the heat falling off round it
   colour -> heat through one ramp: black, blue, teal, salmon, pale
   dots   -> the colour pattern-dithered (Knoll, 4x4 Bayer) onto the palette
 
@@ -44,6 +46,10 @@ class Glow2:
     plane_heat: float = 0.80   # the heat the brightest plane reaches
     plane_gamma: float = 1.6   # how fast the planes thin out below it
     line_min: int = 14         # the shortest line kept (dots): no worms on rough texture
+    source: float = 0.6        # how much heat the picture's light source adds (0: none)
+    source_size: float = 0.04  # how far that heat reaches round it, as a share of the frame
+    source_spill: float = 0.06 # how much of it lights the black round the source
+    source_xy: tuple | None = None   # the source set by hand (x, y, 0..1 of the frame)
     spread: float = 0.6        # how far the dither may reach for colours off the target
     # heat -> colour: black, blue, teal, salmon, pale
     ramp: tuple = ((0.0, (0, 0, 0)), (0.45, (44, 114, 222)), (0.7, (61, 157, 152)), (0.82, (79, 190, 100)),
@@ -89,6 +95,42 @@ def drawn(v: np.ndarray, P: Glow2) -> np.ndarray:
     return np.maximum(lines, planes).astype(np.float32)
 
 
+def emissive(rgba: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Light as a source gives it: bright, or strongly coloured (a red neon tube is dim by luminance)."""
+    if line_art(rgba, v):
+        return v
+    return np.maximum(v, rgba[..., :3].max(-1).astype(np.float32) / 255 * (rgba[..., 3].astype(np.float32) / 255))
+
+
+def source(rgba: np.ndarray, v: np.ndarray, P: Glow2) -> np.ndarray:
+    """The light source as a field, 1 on it and falling off round it; zeros if there is none."""
+    h, w = v.shape
+    long = max(h, w)
+    if P.source_xy is not None:
+        region = np.zeros((h, w), np.uint8)
+        cv2.circle(region, (round(P.source_xy[0] * (w - 1)), round(P.source_xy[1] * (h - 1))), max(2, round(0.012 * long)), 1, -1)
+    else:
+        e = emissive(rgba, v)
+        small, large = cv2.GaussianBlur(e, (0, 0), 0.012 * long), cv2.GaussianBlur(e, (0, 0), 0.06 * long)
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        centre = np.exp(-(((xx - w / 2) / (0.45 * w)) ** 2 + ((yy - h / 2) / (0.45 * h)) ** 2))
+        # compact light stands out of its surround (a broad flat white does not); nearer the middle counts more
+        score = (small - 0.4 * large) * (0.5 + 0.5 * centre)
+        m = round(0.04 * long)
+        score[:m], score[-m:], score[:, :m], score[:, -m:] = -1, -1, -1, -1
+        y, x = np.unravel_index(int(score.argmax()), score.shape)
+        if score[y, x] < 0.05:
+            return np.zeros_like(v)
+        n, lab = cv2.connectedComponents((small > 0.8 * small[y, x]).astype(np.uint8))
+        region = (lab == lab[y, x]).astype(np.uint8)
+        if region.sum() > 0.012 * h * w:   # too broad to be one source: keep its heart only
+            near = np.zeros((h, w), np.uint8)
+            cv2.circle(near, (int(x), int(y)), round(0.035 * long), 1, -1)
+            region &= near
+    d = cv2.distanceTransform(1 - region, cv2.DIST_L2, 3)
+    return np.exp(-(d / (P.source_size * long)) ** 2).astype(np.float32)
+
+
 def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> np.ndarray:
     """Pattern dither: per dot, n palette picks whose mix nears the target; the Bayer cell picks one."""
     h, w, _ = target.shape
@@ -109,7 +151,7 @@ def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> np
 def glow2(rgba: np.ndarray, P: Glow2 | None = None, invert: bool | None = None) -> tuple[np.ndarray, np.ndarray]:
     """One frame: (palette index per dot, palette)."""
     P = P or Glow2()
-    v = light(rgba, invert)
+    v = v0 = light(rgba, invert)
     draw = P.draw if P.draw is not None else float(not line_art(rgba, v))
     if draw:
         v = drawn(v, P)
@@ -118,7 +160,11 @@ def glow2(rgba: np.ndarray, P: Glow2 | None = None, invert: bool | None = None) 
             v = v + P.lines * (v - cv2.GaussianBlur(v, (0, 0), 1.2))
         v = np.clip((v - P.black) / (P.white - P.black), 0, 1) ** P.gamma
     near = cv2.GaussianBlur(v, (0, 0), P.bloom_size)
-    heat = np.clip(v * (1 + P.bloom * near) + P.halo * near, 0, 1)
+    heat = v * (1 + P.bloom * near) + P.halo * near
+    if P.source:
+        lit = np.minimum(np.maximum(v, emissive(rgba, v0) - P.black) * 2, 1)
+        heat = heat + P.source * source(rgba, v0, P) * (P.source_spill + (1 - P.source_spill) * lit)
+    heat = np.clip(heat, 0, 1)
     xs = np.array([s for s, _ in P.ramp], np.float32)
     cs = np.array([c for _, c in P.ramp], np.float32)
     target = np.stack([np.interp(heat, xs, cs[:, k]) for k in range(3)], -1).astype(np.float32)
