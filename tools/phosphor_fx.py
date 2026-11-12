@@ -773,6 +773,7 @@ class Dust:
     sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
     specks_glint: int = 40      # small glints out in the drift, each twinkling for part of the loop
     haze: float = 0.12          # faint dark-grey dots round the lit ones (0: none)
+    flat: bool = False          # one flat grey for everything (no shades, no haze), as some dust art is
     mote_len: tuple[int, int] = (2, 14)  # dots in a mote, least and most: a short dash along its way
     mote_tail: float = 0.3      # how quickly long motes get rare (geometric: lower, more long ones)
     falloff: float = 1.5        # how fast motes thin out as they go
@@ -797,6 +798,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     NL = len(lv) - 1
     pal = (np.concatenate([lv, [0.06, 0.13]])[:, None] * c[None]).astype(np.uint8)   # and two faint greys past the ramp, for the haze
     HAZE = (NL + 1, NL + 2)
+    if P.flat:   # one flat tone for every speck, stroke and mote, and no haze: the even grey kind of dust
+        pal[1:NL + 1] = (0.86 * c).astype(np.uint8)
     tt = np.clip(P.gain * np.clip((t - P.black) / (1 - P.black), 0, 1) ** P.gamma, 0, 1).astype(np.float32)
     if (a > 0.5).any():   # the figure's brightest at full light, whatever the picture
         tt = np.clip(tt / max(float(np.percentile(tt[a > 0.5], 98)), 0.2), 0, 1).astype(np.float32)
@@ -1007,7 +1010,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
                 big = 0.07 <= ph_ <= 0.28
                 pts = [(gx_, gy_)] + [(gx_ + ox, gy_ + oy) for ox in (-1, 0, 1) for oy in (-1, 0, 1) if (ox or oy) and (big or ox == 0 or oy == 0) and rng.random() < 0.75]
                 plot(img, np.float32(pts), np.uint8([int(gl)] + [int(rng.integers(2, int(gl))) for _ in pts[1:]]))
-        if P.haze > 0:   # a faint dark-grey haze hugging the lit dots, a dot or two out: the specks glow
+        if P.haze > 0 and not P.flat:   # a faint dark-grey haze hugging the lit dots, a dot or two out: the specks glow
             hz = cv2.GaussianBlur((img > 0).astype(np.float32), (0, 0), 1.2)
             hr = rng.random((H, W))
             on = (img == 0) & (hr < P.haze * np.clip(hz * 2, 0, 1))
@@ -1090,9 +1093,12 @@ COLOURS = {'red': '#ee1111', 'white': '#f2f2f2', 'grey': '#d8d8d8', 'green': '#4
            'rose': '#f07aa6'}
 
 
-def params(style: str, frames: int | None = None, colour: str | None = None, angle: float | None = None):
+def params(style: str, frames: int | None = None, colour: str | None = None, angle: float | None = None,
+           flat: bool = False):
     """A style's settings, with the given ones changed."""
     P = STYLES[style][1]()
+    if flat and isinstance(P, Dust):
+        P.flat = True
     if frames:
         P.frames = frames
     if colour and isinstance(P, (Streak, Dust)):
@@ -1103,12 +1109,12 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
 
 
 def render(rgba: np.ndarray, style: str, frames: int | None = None, colour: str | None = None,
-           angle: float | None = None, seed: int | None = None) -> Frames:
+           angle: float | None = None, seed: int | None = None, flat: bool = False) -> Frames:
     """A framed picture (RGBA at the output size) as a clip in a style. Without a seed, one from
     the picture: the same picture comes out the same, and no two pictures share their rain."""
     if seed is None:
         seed = zlib.crc32(np.ascontiguousarray(rgba[::7, ::7]).tobytes())
-    return STYLES[style][0](analyse(rgba), params(style, frames, colour, angle), seed)
+    return STYLES[style][0](analyse(rgba), params(style, frames, colour, angle, flat), seed)
 
 
 def main() -> None:
@@ -1123,6 +1129,7 @@ def main() -> None:
     ap.add_argument('--cutout', action='store_true', help='cut the figure out (GrabCut) first')
     ap.add_argument('--colour', help='streak, dust: the colour (hex, or ' + ', '.join(COLOURS) + ')')
     ap.add_argument('--angle', type=float, help='glow, dust: which way the streams or the dust go (degrees, 0 right, 90 down)')
+    ap.add_argument('--flat', action='store_true', help='dust: one flat grey, no shades or haze')
     ap.add_argument('--seed', type=int, help='default: one from the picture')
     ap.add_argument('--out', type=Path, help='default out/<picture>/fx')
     ap.add_argument('--formats', default='gif,webp,png')
@@ -1131,7 +1138,7 @@ def main() -> None:
     out = a.out or Path('out') / a.picture.stem / 'fx'
     img = Image.open(a.picture)
     for name in (STYLES if a.style == 'all' else [a.style]):
-        P = params(name, a.frames, a.colour, a.angle)
+        P = params(name, a.frames, a.colour, a.angle, a.flat)
         long = a.long or P.long
         k = long / max(aw, ah)
         rgba = prepare(img, (max(8, round(aw * k)), max(8, round(ah * k))), a.cutout)

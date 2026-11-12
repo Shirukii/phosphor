@@ -668,14 +668,14 @@ type Style = Exclude<Mode, 'live'>;
 const FX_COLOURS: [string, string][] = [['red', '#ee1111'], ['white', '#f2f2f2'], ['grey', '#d8d8d8'], ['green', '#4fe08a'], ['blue', '#6f93e8'], ['amber', '#ffb347'], ['rose', '#f07aa6']];
 // each style's choices (value, label), and what it starts at: glow is a slow 3 s loop at 24 fps on a
 // fine grid, streak a fast 1 s boil on a coarse one, dust a 2 s drift on a fine one
-type FxSet = { long: number, frames: number, scale: number, angle: number, colour: string };
+type FxSet = { long: number, frames: number, scale: number, angle: number, colour: string, flat?: boolean };
 const FX: Record<Style, { long: number[], len: [number, string][], scale: number[], fps: number, d: FxSet }> = {
   glow: { long: [360, 540, 720], len: [[48, '2 s'], [72, '3 s'], [96, '4 s']], scale: [1, 2], fps: 24,
     d: { long: 540, frames: 72, scale: 2, angle: 0, colour: '' } },
   streak: { long: [180, 270, 360], len: [[12, '½ s'], [24, '1 s'], [48, '2 s']], scale: [2, 4], fps: 24,
     d: { long: 270, frames: 24, scale: 4, angle: 0, colour: 'red' } },
   dust: { long: [360, 540, 720], len: [[24, '1 s'], [48, '2 s'], [72, '3 s']], scale: [1, 2], fps: 24,
-    d: { long: 540, frames: 48, scale: 2, angle: 0, colour: 'white' } },
+    d: { long: 540, frames: 48, scale: 2, angle: 0, colour: 'white', flat: false } },
 };
 const FX_ANGLES: [number, string, string][] = [[0, '↔', 'Across'], [90, '↕', 'Up and down'], [45, '⤡', 'Diagonal, falling'], [315, '⤢', 'Diagonal, rising']];
 const fxSets: Record<Style, FxSet> = { glow: { ...FX.glow.d }, streak: { ...FX.streak.d }, dust: { ...FX.dust.d } };
@@ -693,6 +693,7 @@ function fxButtons(): void {
   $('fx-scale').innerHTML = o.scale.map(v => b(v, v + '×', v === c.scale)).join('');
   $('fx-angle').innerHTML = FX_ANGLES.map(([v, l, t]) => b(v, l, v === c.angle, t)).join('');
   setSeg('fx-colours', c.colour);
+  setSeg('fx-tone', c.flat ? '1' : '0');
 }
 
 $('fx-colours').innerHTML = FX_COLOURS.map(([v, c]) =>
@@ -702,6 +703,7 @@ seg('fx-long', v => { fxSet().long = Number(v); renderFx(0); });
 seg('fx-len', v => { fxSet().frames = Number(v); renderFx(0); });
 seg('fx-scale', v => { fxSet().scale = Number(v); });
 seg('fx-angle', v => { fxSet().angle = Number(v); renderFx(0); });
+seg('fx-tone', v => { fxSet().flat = v === '1'; renderFx(0); });
 seg('mode', v => setMode(v as Mode));
 
 function setMode(m: Mode): void {
@@ -713,6 +715,7 @@ function setMode(m: Mode): void {
   $('fx-bar').classList.toggle('off', live || !st.map);
   $('fx-colours').hidden = m === 'live' || m === 'glow';
   $('fx-angle').hidden = m !== 'glow' && m !== 'dust';
+  $('fx-tone').hidden = m !== 'dust';
   fxButtons();
   $('fx-img').hidden = live || !fxs.url;
   $('fx-wait').hidden = true;
@@ -730,7 +733,7 @@ function setMode(m: Mode): void {
 function fxBody(format: string, scale: number, save: boolean): object {
   const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
   return { ...params(), style: fxs.mode, long: fxSet().long, frames: fxSet().frames, angle: fxs.mode === 'streak' ? undefined : fxSet().angle,
-    colour: fxSet().colour || undefined, format, scale, name,
+    colour: fxSet().colour || undefined, flat: fxs.mode === 'dust' ? fxSet().flat : undefined, format, scale, name,
     save: save && !server.public && $<HTMLInputElement>('save').checked };
 }
 async function fxFetch(format: string, scale: number, save = false): Promise<Response> {
