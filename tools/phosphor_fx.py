@@ -217,12 +217,13 @@ class Glow:
     # every other colour among them; round the light a band rich in green; the light itself orange
     # and magenta with a little white, hardly any blue.
     ramp: tuple = ((0.0, 0.0, (0.83, 0.06, 0.05, 0.045, 0.015)),
-                   (0.2, 0.2, (0.83, 0.06, 0.05, 0.045, 0.015)),
-                   (0.45, 0.5, (0.83, 0.06, 0.05, 0.045, 0.015)),
-                   (0.6, 0.7, (0.68, 0.16, 0.07, 0.07, 0.02)),
-                   (0.75, 0.86, (0.42, 0.38, 0.08, 0.10, 0.02)),
-                   (0.88, 0.96, (0.12, 0.10, 0.30, 0.45, 0.03)),
+                   (0.45, 1.0, (0.83, 0.06, 0.05, 0.045, 0.015)),
+                   (0.6, 1.0, (0.68, 0.16, 0.07, 0.07, 0.02)),
+                   (0.75, 1.0, (0.42, 0.38, 0.08, 0.10, 0.02)),
+                   (0.88, 1.0, (0.12, 0.10, 0.30, 0.45, 0.03)),
                    (1.0, 1.0, (0.04, 0.02, 0.32, 0.52, 0.10)))
+    floor: float = 0.06        # light fainter than this share of full is left black
+    shake: float = 0.25        # how far a dot's place in the dither pattern is shaken (of one step): small shares still show
 
 
 def light(rgba: np.ndarray) -> np.ndarray:
@@ -300,17 +301,17 @@ def exposed(v: np.ndarray, P: Glow) -> np.ndarray:
 ORDER = np.array([0, 1, 3, 2, 4, 5])   # the palette dark to light: black, blue, magenta, green, orange, white
 
 
-def pattern(cover: np.ndarray, mix: np.ndarray, seed: int) -> tuple[np.ndarray, np.ndarray]:
+def pattern(cover: np.ndarray, mix: np.ndarray, seed: int, shake: float = 0.25) -> tuple[np.ndarray, np.ndarray]:
     """Pattern dither of a mix. Per dot: how much of it is lit (cover, 0..1) and the shares of the five
     colours among the lit (mix, (..., 5): blue, green, magenta, orange, white). Returns, per dot, the
     thresholds at which it steps up from black through the colours dark to light, and its own
-    threshold: its place in the 4x4 Bayer pattern, shaken within its step so small shares still show."""
+    threshold: its place in the 8x8 Bayer pattern, shaken a little so small shares still show."""
     h, w = cover.shape
     share = np.concatenate([1 - cover[..., None], cover[..., None] * mix], -1).reshape(-1, 6)[:, ORDER]
     steps = np.cumsum(share, 1)[:, :-1].astype(np.float32)
     rng = np.random.default_rng(seed)
-    cell = np.tile(BAYER4, (h // 4 + 1, w // 4 + 1))[:h, :w].reshape(-1)
-    return steps, ((cell + rng.random(cell.size)) / 16).astype(np.float32)
+    cell = (bayer(h, w).reshape(-1) * 64 - 0.5)   # 0..63
+    return steps, (((cell + 0.5 + shake * 64 * (rng.random(cell.size) - 0.5)) / 64) % 1.0).astype(np.float32)
 
 
 def dots(steps: np.ndarray, t: np.ndarray) -> np.ndarray:
@@ -362,8 +363,9 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     mix = mix / mix.sum(1, keepdims=True)
     cs = np.array([c for _, c, _ in P.ramp], np.float32)
     cover = np.interp(heat, xs, cs).astype(np.float32)
+    cover = np.clip((cover - P.floor) / (1 - P.floor), 0, 1)   # the faintest light is black: no stray dots in the void
     shares = np.stack([np.interp(heat, xs, mix[:, k]) for k in range(5)], -1).astype(np.float32)
-    steps, t = pattern(cover, shares, seed)
+    steps, t = pattern(cover, shares, seed, P.shake)
     return animate(steps, t, heat.shape, P, seed), GLOW_PALETTE.astype(np.uint8)
 
 
