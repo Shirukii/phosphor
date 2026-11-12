@@ -193,6 +193,7 @@ class Glow:
     core_halo: float = 0.25     # density added round the hot core, fading over about 8 dots
     core_fade: float = 8.0      # dots over which the hot core's orange fades to green at its edge
     grain: float = 0.2          # share of the hot core's dots turned white (and half that magenta)
+    lit_floor: float = 0.3      # the least density in the figure's brightest broad light (its top tenth)
     halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
     feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
@@ -288,6 +289,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         shade_min = max(shade_min, float(np.percentile(soft, 50)))
     p = np.maximum(p, P.floor * (a > 0.5) * (soft > shade_min))   # the dark of the figure keeps a sparse blue dither
     p = np.maximum(p, P.halo * np.clip((soft - 0.12) / 0.25, 0, 1) * (a > 0.5) * (soft > shade_min))   # the mid-tones fade out, not cut to black
+    if P.lit_floor > 0 and body.any():   # smooth lit areas (a cheek, a palm) still fill by their light, not only by detail
+        q50, q90 = np.percentile(soft[body], [50, 90])
+        lit_s = np.clip((soft - q50) / max(q90 - q50, 1e-3), 0, 1)
+        p = np.maximum(p, P.lit_floor * lit_s * lit_s * (3 - 2 * lit_s) * body)
     thr = P.order * bayer(H, W) + (1 - P.order) * rng.random((H, W), np.float32)
 
     # colour per dot: by the broad light, in zones along one ramp (blue, blue 2, green, orange,
@@ -802,6 +807,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     fdir = (P.comb + (1 - P.comb) * sw)[..., None] * dv + ((1 - P.comb) * (1 - sw))[..., None] * fdir   # combed by the drift where it comes apart
     fdir /= np.linalg.norm(fdir, axis=-1, keepdims=True) + 1e-6
 
+    top_lit = tt > (np.percentile(tt[a > 0.5], 97) if (a > 0.5).any() else 1)
     fstep = np.round(fdir * 1.2).astype(int)   # the neighbouring dot along the shapes, combed by the drift where it comes apart
     fstep[(fstep[..., 0] == 0) & (fstep[..., 1] == 0)] = (1, 0)
     spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
@@ -817,11 +823,12 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         lev = rng.integers(1, NL + 1, (H, W))
         if P.shade_lev > 0:   # brighter specks where it's lit: the greys follow the light, not chance
             lev = np.clip(np.round((1 - P.shade_lev) * lev + P.shade_lev * (1.5 + (NL - 1) * np.sqrt(tt))), 1, NL).astype(int)
+            lev = np.where(top_lit, lev, np.minimum(lev, NL - 1))   # white only in the very brightest
         if P.outline > 0:   # the silhouette and strongest edges as bright strokes; stray dim specks go
             lit &= ~((lev <= 3) & (cv2.filter2D(lit.astype(np.uint8), -1, k8, borderType=cv2.BORDER_CONSTANT) == 0) & ~fz)
             stroke = rim & (rng.random((H, W)) < P.outline * (1 - 0.8 * sw))   # thinning where the figure comes apart
             lit |= stroke
-            lev = np.where(stroke, NL - rng.integers(0, 2, (H, W)), lev)
+            lev = np.where(stroke, np.where(top_lit, NL, NL - 1), lev)
         if P.pair > 0:   # lone body specks move next to a neighbour along the shapes: short dashes, not a checker mesh
             k4 = np.float32([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
             lone = lit & (cv2.filter2D(lit.astype(np.uint8), -1, k4, borderType=cv2.BORDER_CONSTANT) == 0) & (rng.random((H, W)) < P.pair)
@@ -838,7 +845,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             fx, fy = fs[:, 0].astype(int), fs[:, 1].astype(int)
             fv = fdir[fy, fx]
             ln = rng.integers(P.fleck_len[0], P.fleck_len[1] + 1, len(fs))
-            fl = rng.integers(2, NL + 1, len(fs)).astype(np.uint8)
+            fl = rng.integers(2, NL, len(fs)).astype(np.uint8)   # never white: that's for the brightest
             wig = rng.normal(0, 0.15, (len(fs), 2)).astype(np.float32)
             for j in range(P.fleck_len[1]):
                 on = j < ln
