@@ -1,0 +1,40 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Compare __TAG__</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0d0e12;--fg:#e8e8ee;--mut:#8b91a0;--line:#2a2d36;--acc:#6f93e8}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,sans-serif}
+header{padding:12px 16px;border-bottom:1px solid var(--line)}header b{font-weight:600}.mut{color:var(--mut)}
+.row{padding:14px 16px;border-bottom:1px solid var(--line)}
+.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.pair figure{margin:0}.pair figcaption{color:var(--mut);padding:0 0 4px}
+.pair img,.pair video{width:100%;aspect-ratio:1;object-fit:contain;background:#000;image-rendering:pixelated;border-radius:4px;cursor:zoom-in;display:block}
+.bar{display:flex;gap:8px;align-items:center;padding-top:10px;flex-wrap:wrap}
+button{background:#1a1c23;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 13px;font:inherit;cursor:pointer}
+button:hover{border-color:var(--acc)}button[aria-pressed=true]{background:var(--acc);border-color:var(--acc);color:#0d0e12}
+input{flex:1;min-width:240px;background:#111;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;font:inherit}
+#zoom{position:fixed;inset:0;background:#000;display:none;overflow:auto;cursor:zoom-out;z-index:9}
+#zoom img,#zoom video{image-rendering:pixelated;display:block;margin:auto}
+@media(max-width:700px){.pair{grid-template-columns:1fr}}
+</style></head><body>
+<header><b>The artist beside ours (__TAG__)</b>
+<div class="mut">Different pictures in each row, so judge the look, not the subject. Rate how close ours is in kind (1 far, 5 could be his) and say what gives ours away. Click a clip to see it full size. Saved as you go.</div></header>
+<div id="rows"></div>
+<div id="zoom"></div>
+<script>
+const R=__ROWS__, K='compare___TAG__'; let st; try{st=JSON.parse(localStorage.getItem(K))||{}}catch(e){st={}}
+window.notes=st;
+const save=()=>{window.notes=st;try{localStorage.setItem(K,JSON.stringify(st))}catch(e){}};
+const clip=f=>f.endsWith('.mp4')?`<video src="${f}" autoplay loop muted playsinline></video>`:`<img src="${f}" alt="">`;
+const box=document.getElementById('rows');
+for(const [k,label,ref,ours] of R){
+  const d=document.createElement('div'); d.className='row'; const s=st[k]||(st[k]={});
+  d.innerHTML=`<div class="pair"><figure><figcaption>The artist</figcaption>${clip(ref)}</figure><figure><figcaption>Ours: ${label}</figcaption>${clip(ours)}</figure></div>
+  <div class="bar"><span class="mut">How close?</span>${[1,2,3,4,5].map(n=>`<button data-n="${n}" aria-pressed="${s.v===n}">${n}</button>`).join('')}
+  <input placeholder="what gives ours away (colour, density, lines, motion...)" value="${(s.note||'').replace(/"/g,'&quot;')}"></div>`;
+  d.querySelectorAll('button').forEach(b=>b.onclick=()=>{s.v=+b.dataset.n;save();d.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',x===b))});
+  d.querySelector('input').oninput=e=>{s.note=e.target.value;save()};
+  d.querySelectorAll('.pair img,.pair video').forEach(m=>m.onclick=()=>{const z=document.getElementById('zoom');z.innerHTML=clip(m.getAttribute('src'));z.style.display='block'});
+  box.appendChild(d);
+}
+document.getElementById('zoom').onclick=e=>{e.currentTarget.style.display='none';e.currentTarget.innerHTML=''};
+</script></body></html>
