@@ -513,7 +513,7 @@ class Streak:
     gain: float = 1.0           # more or less light
     gamma: float = 1.7          # tone curve: above 1, darker mid-tones and more contrast
     local: float = 0.5          # local contrast before the dither (light against its surroundings, 8 dots)
-    most: float = 0.86          # the densest the dots get: near solid in the highlights, a pinhole in seven
+    most: float = 0.8           # the densest the dots get: dense in the highlights, never solid
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
@@ -523,6 +523,7 @@ class Streak:
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
     even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
     jitter: float = 0.6         # threshold shake in the dither: maze-like chains, not stripes and checks
+    kernel: str = 'atkinson'    # error diffusion: 'floyd' (Floyd-Steinberg) or 'atkinson' (diagonal weave, more contrast)
     clump: float = 0.0          # in the brightest, holes from noise blurred this much (dots): loose pairs, not a grid
     plane: int = 120            # the least dots a patch of bright light needs to go near solid
     hold: float = 0.5           # share of the figure's dots held from one dither all loop (less boil)
@@ -565,6 +566,31 @@ def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None, hold_j: float = 0.0)
                 v -= 1
             if v:
                 r0[x + d] += v * 0.4375; r1[x - d] += v * 0.1875; r1[x] += v * 0.3125; r1[x + d] += v * 0.0625
+    return out
+
+
+def diffuse_atkinson(img: np.ndarray, jitter: float = 0.0, rng=None) -> np.ndarray:
+    """Atkinson error diffusion, serpentine: only three quarters of the error is passed on, so
+    tone pulls towards dark and bright, and mid tones settle into a diagonal weave, not noise."""
+    H, W = img.shape
+    e = np.zeros((H + 2, W + 4), np.float32)
+    e[:H, 2:W + 2] = img
+    rows = e.tolist()
+    th = (0.5 + jitter * (rng.random((H, W + 4)) - 0.5)).tolist() if jitter > 0 else [[0.5] * (W + 4)] * H
+    out = np.zeros((H, W), bool)
+    for y in range(H):
+        r0, r1, r2, t0 = rows[y], rows[y + 1], rows[y + 2], th[y]
+        xs, d = (range(2, W + 2), 1) if y % 2 == 0 else (range(W + 1, 1, -1), -1)
+        for x in xs:
+            v = r0[x]
+            if v >= t0[x]:
+                out[y, x - 2] = True
+                v -= 1
+            if v:
+                v *= 0.125
+                r0[x + d] += v; r0[x + 2 * d] += v
+                r1[x - d] += v; r1[x] += v; r1[x + d] += v
+                r2[x] += v
     return out
 
 
@@ -640,7 +666,7 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         o = f % 4                       # Floyd-Steinberg runs one way: turn it each frame so no direction shows
         nz = noisy.T if o & 2 else noisy
         nz = nz[:, ::-1] if o & 1 else nz
-        bits = diffuse(np.ascontiguousarray(nz), P.jitter, rng)
+        bits = (diffuse_atkinson if P.kernel == 'atkinson' else diffuse)(np.ascontiguousarray(nz), P.jitter, rng)
         bits = bits[:, ::-1] if o & 1 else bits
         bits = bits.T if o & 2 else bits
         if P.clump > 0:   # the brightest: holes from lightly clumped noise, in pairs and short runs, not a lattice
