@@ -192,7 +192,7 @@
   .marker span { position: absolute; left: 14px; top: -14px; font: 10px/1 var(--mono); color: #f2c76b; white-space: nowrap; text-transform: uppercase; letter-spacing: .06em; }
   .picking .marker { display: block; }
   .picking #stage { cursor: crosshair; }
-  .pick-note { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 99px; background: #f2c76b; color: var(--ink); font-size: 12px; font-weight: 600; display: none; z-index: 2; white-space: nowrap; }
+  .pick-note { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 99px; background: #f2c76b; color: var(--ink); font-size: 12px; font-weight: 600; display: none; z-index: 2; white-space: nowrap; }
   .picking .pick-note { display: block; }
   .ghost-screen { display: grid; justify-items: center; gap: 10px; color: var(--faint); font-size: 12px; text-align: center; padding: 24px; }
   .live-bar { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; z-index: 2; }
@@ -205,6 +205,13 @@
   .live-bar .swatches button[aria-pressed=true] .sw { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px currentColor; }
   .live-bar .label { color: var(--faint); font: 10px/28px var(--mono); text-transform: uppercase; letter-spacing: .07em; padding: 0 4px 0 6px; }
   .live-bar.off { display: none; }
+  .live-bar.at-top { top: 12px; bottom: auto; }
+  #fx-img { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+  .fx-wait { display: grid; justify-items: center; gap: 10px; color: var(--muted); font-size: 12px; z-index: 1; }
+  .fx-wait i { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: spin .9s linear infinite; }
+  .fx-wait.over { align-self: start; margin-top: 64px; padding: 8px 14px; border-radius: 99px; background: rgba(13, 15, 19, .86); border: 1px solid var(--line-2); grid-auto-flow: column; align-items: center; }
+  .fx-wait.over i { width: 14px; height: 14px; }
+  @keyframes spin { to { transform: rotate(1turn); } }
 
   /* ---------- medium: preview under the editor */
   @media (max-width: 1240px) {
@@ -265,7 +272,7 @@
   <div class="tabs">
     <div class="seg fill" id="view-tabs" role="tablist">
       <button data-v="picture" aria-pressed="true">Picture</button>
-      <button data-v="live" aria-pressed="false">Live</button>
+      <button data-v="live" aria-pressed="false">Preview</button>
     </div>
     <span class="mstatus" id="mstatus"></span>
   </div>
@@ -365,14 +372,23 @@
     </div>
   </section>
 
-  <section class="pane live" aria-label="Live preview">
-    <div class="pane-head">Live<span class="meta" id="live-meta"></span></div>
+  <section class="pane live" aria-label="Preview">
+    <div class="pane-head">Preview<span class="meta" id="live-meta"></span></div>
     <div class="pane-body" id="preview-box">
       <div class="screen">
         <div id="stage"><div class="marker" id="m-pivot"><span>neck</span></div><div class="marker" id="m-center"><span>head</span></div></div>
+        <img id="fx-img" alt="The picture in the chosen style" hidden>
+        <div class="fx-wait" id="fx-wait" hidden><i></i><span>Rendering…</span></div>
         <div class="ghost-screen" id="prev-empty">
           <svg width="120" height="80" viewBox="0 0 120 80" aria-hidden="true"><g fill="currentColor" opacity=".55" id="ghost-dots"></g></svg>
           <span>The live preview shows up here</span>
+        </div>
+      </div>
+      <div class="live-bar at-top off" id="mode-bar">
+        <div class="group" id="mode" role="group" aria-label="Style">
+          <button data-v="live" aria-pressed="true" title="Phosphor's own look: breathing and blinking, live">Live</button>
+          <button data-v="glow" title="Many colours, glowing edges, drifting dust: a looping clip">Glow</button>
+          <button data-v="streak" title="One colour, flowing dashes and rain: a looping clip">Streak</button>
         </div>
       </div>
       <div class="pick-note" id="pick-note">Click the top of the neck</div>
@@ -388,6 +404,18 @@
         <div class="group" id="pick"><button data-v="pivot" title="Click the top of the neck: the head tilts about it">Neck</button><button data-v="center" title="Click the middle of the head: the rays come from it">Head</button>
           <button id="reveal" title="Play the start-up again">
             <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.2 7a4.8 4.8 0 1 0 1.4-3.4M2.2 1.8v2.4h2.4"/></svg></button></div>
+      </div>
+      <div class="live-bar off" id="fx-bar">
+        <div class="group swatches" id="fx-colours"></div>
+        <div class="group" id="fx-long" title="Dots across the longer side"><button data-v="360">360</button><button data-v="540" aria-pressed="true">540</button><button data-v="720">720</button></div>
+        <div class="group" id="fx-len" title="How long one loop runs"><button data-v="32">2 s</button><button data-v="48" aria-pressed="true">3 s</button><button data-v="64">4 s</button></div>
+        <div class="group" id="fx-scale" title="Each dot as 1×1 or 2×2 px in the files"><button data-v="1">1×</button><button data-v="2" aria-pressed="true">2×</button></div>
+        <div class="group">
+          <button id="fx-gif" title="Download a looping GIF">
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M7 1.8v7.7M3.8 6.3 7 9.5l3.2-3.2M1.8 12.2h10.4"/></svg>GIF</button>
+          <button id="fx-webp" title="Download an animated WebP: the same dots, a fraction of the GIF's size">
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M7 1.8v7.7M3.8 6.3 7 9.5l3.2-3.2M1.8 12.2h10.4"/></svg>WebP</button>
+        </div>
       </div>
     </div>
   </section>

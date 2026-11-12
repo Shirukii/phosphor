@@ -409,6 +409,7 @@ async function openPicture(body: { name: string; data?: string }, src: string): 
     eyes: [], eyeSel: -1, pose: null, poseSet: {}, map: null, frames: 1,
   });
   $<HTMLInputElement>('name').value = r.name;
+  fxs.seq++; fxs.w = 0; $('fx-img').hidden = true; // the last picture's clip
   setSkip(r.hasAlpha); // a picture with its own transparency is cut out already
   selectEye(-1);
   setTool('box');
@@ -453,6 +454,7 @@ async function build(): Promise<void> {
   status(blinks ? 'Ready' : 'Ready · mark the eyes to make it blink', 'ok');
   $<HTMLButtonElement>('export').disabled = false;
   exportSummary();
+  if (fxs.mode !== 'live') renderFx();
 }
 
 // ---- the live preview
@@ -475,8 +477,8 @@ function showPreview(): void {
   $('stage').prepend(ph.canvas);
   if (!ph.load()) { status('No WebGL in this browser: no live preview, but export still works.', 'bad'); return; }
   $('prev-empty').hidden = true;
-  $('live-bar').classList.remove('off');
-  fitPreview();
+  $('mode-bar').classList.remove('off');
+  setMode(fxs.mode);
 }
 
 function applyLook(): void {
@@ -493,6 +495,7 @@ function applyLook(): void {
 }
 
 function fitPreview(): void {
+  if (fxs.mode !== 'live') { fitFx(); return; }
   if (!st.map || !ph) return;
   const r = $('preview-box').getBoundingClientRect(), W = st.map.w, H = st.map.h;
   const bar = $('live-bar').getBoundingClientRect().height + 28;
@@ -657,6 +660,102 @@ $('export').addEventListener('click', async () => {
     status(`Downloaded ${name}.zip${saved ? ` · saved to ${saved}/` : ''}`, 'ok');
   });
 });
+
+// ---- styled clips: glow and streak, rendered on the server as a looping WebP (preview) or GIF
+
+type Mode = 'live' | 'glow' | 'streak';
+const FX_COLOURS: [string, string][] = [['red', '#ff2020'], ['white', '#f2f2f2'], ['green', '#4fe08a'], ['blue', '#6f93e8'], ['amber', '#ffb347'], ['rose', '#f07aa6']];
+const fxs = { mode: 'live' as Mode, colour: 'red', long: 540, frames: 48, scale: 2, url: '', seq: 0, w: 0, h: 0 };
+let fxTimer = 0;
+
+$('fx-colours').innerHTML = FX_COLOURS.map(([v, c]) =>
+  `<button data-v="${v}" aria-pressed="${v === fxs.colour}" title="${v}"><span class="sw" style="background:${c}"></span></button>`).join('');
+seg('fx-colours', v => { fxs.colour = v; renderFx(0); });
+seg('fx-long', v => { fxs.long = Number(v); renderFx(0); });
+seg('fx-len', v => { fxs.frames = Number(v); renderFx(0); });
+seg('fx-scale', v => { fxs.scale = Number(v); });
+seg('mode', v => setMode(v as Mode));
+
+function setMode(m: Mode): void {
+  fxs.mode = m;
+  setSeg('mode', m);
+  const live = m === 'live';
+  if (ph) ph.canvas.hidden = !live;
+  $('live-bar').classList.toggle('off', !live || !st.map);
+  $('fx-bar').classList.toggle('off', live || !st.map);
+  $('fx-colours').hidden = m !== 'streak';
+  $('fx-img').hidden = live || !fxs.url;
+  $('fx-wait').hidden = true;
+  if (live) {
+    if (picking) setPicking(null);
+    fxs.seq++; // a clip still on its way is no longer wanted
+    if (st.map) $('live-meta').textContent = `${st.map.w} × ${st.map.h} · live`;
+    fitPreview();
+  } else {
+    $('fx-img').hidden = true; // the last clip was another style, or another picture
+    renderFx(0);
+  }
+}
+
+function fxBody(format: string, scale: number, save: boolean): object {
+  const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
+  return { ...params(), style: fxs.mode, long: fxs.long, frames: fxs.frames, colour: fxs.colour, format, scale, name,
+    save: save && !server.public && $<HTMLInputElement>('save').checked };
+}
+async function fxFetch(format: string, scale: number, save = false): Promise<Response> {
+  const r = await fetch('/api/fx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fxBody(format, scale, save)) });
+  if (!r.ok) throw new Error(await errorOf(r));
+  return r;
+}
+
+function renderFx(ms = 600): void {
+  clearTimeout(fxTimer);
+  if (fxs.mode === 'live' || !st.id || !st.view) return;
+  fxTimer = window.setTimeout(() => { void drawFx(); }, ms);
+}
+async function drawFx(): Promise<void> {
+  const seq = ++fxs.seq, mode = fxs.mode;
+  const wait = $('fx-wait');
+  wait.classList.toggle('over', !$('fx-img').hidden);
+  wait.hidden = false;
+  const blob = await task(`Rendering ${mode}…`, async () => (await fxFetch('webp', 1)).blob());
+  if (seq !== fxs.seq) return;
+  wait.hidden = true;
+  if (!blob) return;
+  const url = URL.createObjectURL(blob), img = $<HTMLImageElement>('fx-img');
+  await new Promise<void>(ok => { img.onload = () => ok(); img.onerror = () => ok(); img.src = url; });
+  if (fxs.url) URL.revokeObjectURL(fxs.url);
+  fxs.url = url;
+  fxs.w = img.naturalWidth; fxs.h = img.naturalHeight;
+  img.hidden = fxs.mode === 'live';
+  $('live-meta').textContent = `${fxs.w} × ${fxs.h} · ${fxs.frames} frames · ${fxs.frames / 16} s loop`;
+  status('Ready', 'ok');
+  fitFx();
+}
+function fitFx(): void {
+  if (!fxs.w) return;
+  const r = $('preview-box').getBoundingClientRect(), img = $<HTMLImageElement>('fx-img');
+  const room = Math.min((r.width - 32) / fxs.w, (r.height - 2 * ($('fx-bar').getBoundingClientRect().height + 28)) / fxs.h);
+  const z = room >= 1 ? Math.floor(room) : Math.max(0.1, room);
+  img.style.width = fxs.w * z + 'px';
+  img.style.height = fxs.h * z + 'px';
+}
+async function downloadFx(format: 'gif' | 'webp'): Promise<void> {
+  if (!st.id || fxs.mode === 'live') return;
+  await task(`Making the ${format.toUpperCase()}…`, async () => {
+    const r = await fxFetch(format, fxs.scale, true);
+    const blob = await r.blob(), a = document.createElement('a');
+    const name = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '')?.[1] || `clip.${format}`;
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    const saved = r.headers.get('X-Saved');
+    status(`Downloaded ${name} (${(blob.size / 1048576).toFixed(1)} MB)${saved ? ` · saved to ${saved}/` : ''}`, 'ok');
+  });
+}
+$('fx-gif').addEventListener('click', () => void downloadFx('gif'));
+$('fx-webp').addEventListener('click', () => void downloadFx('webp'));
 
 // ---- opening pictures
 

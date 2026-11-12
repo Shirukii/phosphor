@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phosphor in the browser: from a picture to a map and PNGs, with a live preview.
+"""Phosphor in the browser: from a picture to a map and PNGs, with a live preview, or a styled clip.
 
     npm run web            (builds the page, then runs this)
     python tools/phosphor_web.py [--port 8340] [--host 127.0.0.1] [--public]
@@ -11,7 +11,8 @@ downloads a zip and also saves it to out/<name>/ (map.ts, and a folder of PNGs p
 or out/ (nothing of the host's is read or written), smaller limits on uploads, map and PNG sizes,
 fewer pictures kept and for less long, and a few heavy jobs at a time.
 
-A small JSON API over phosphor_prep (cut-out, framing, blink) and phosphor_map (the map, PNGs).
+A small JSON API over phosphor_prep (cut-out, framing, blink), phosphor_map (the map, PNGs) and
+phosphor_fx (the glow and streak clips).
 Pictures are kept in memory, by a random id, until they go unused for a while (or the server
 restarts). Only the standard library besides those two's numpy, opencv and pillow. No secrets.
 """
@@ -37,6 +38,7 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import phosphor_fx as fx  # noqa: E402
 import phosphor_map as pm  # noqa: E402
 import phosphor_prep as pp  # noqa: E402
 
@@ -58,6 +60,9 @@ class Limits:
     max_pixels: int = 64_000_000   # a picture's px (Pillow refuses bigger: decompression bombs)
     max_side: int = 0              # pictures are scaled down to this longest side (0: kept)
     max_out: int = 0               # one PNG's px, after scale (0: no limit)
+    max_fx: int = 1080             # a styled clip's longest side, in dots
+    max_fx_out: int = 2160         # and in px, after scale
+    max_fx_frames: int = 96
     keep: int = 64                 # pictures kept
     ttl: float = 12 * 3600         # seconds unused before one is dropped
     slots: int = 4                 # heavy jobs (cut-out, build, export) at once
@@ -65,7 +70,8 @@ class Limits:
 
 LOCAL = Limits()
 PUBLIC = Limits(public=True, max_size=1024, max_body=24 << 20, max_pixels=40_000_000, max_side=2048,
-                max_out=16_000_000, keep=16, ttl=3600, slots=2)  # ~50 MB a picture: under 1 GB held
+                max_out=16_000_000, max_fx=720, max_fx_out=1440, max_fx_frames=72,
+                keep=16, ttl=3600, slots=2)  # ~50 MB a picture: under 1 GB held
 CFG = LOCAL
 PICTURES: dict[str, dict] = {}  # id -> rgb, alpha (or None), given (its own alpha), name, used
 LOCK = threading.Lock()
@@ -175,7 +181,50 @@ def make(q: dict) -> tuple[dict, dict | None]:
     return m, pp.guess_pose(eyes, view, (W, H))
 
 
-HEAVY = {'/api/cutout', '/api/build', '/api/export'}
+def styled(q: dict) -> tuple[fx.Frames, str]:
+    """A styled clip for a request: picture, cut-out, view, the map's size (for the aspect), style,
+    long (the clip's longest side, in dots), frames, colour. The last one is kept with the picture,
+    so a download right after its preview isn't drawn again."""
+    p = picture(q)
+    style = str(q.get('style'))
+    if style not in fx.STYLES:
+        raise Bad('style: ' + ' or '.join(fx.STYLES))
+    W0, H0 = size_of(q)
+    try:
+        long = int(q.get('long') or 540)
+        frames = int(q.get('frames') or 48)
+    except (TypeError, ValueError):
+        raise Bad('long, frames: whole numbers')
+    if not 64 <= long <= CFG.max_fx:
+        raise Bad(f'long: 64 to {CFG.max_fx} dots')
+    if not 8 <= frames <= CFG.max_fx_frames:
+        raise Bad(f'frames: 8 to {CFG.max_fx_frames}')
+    colour = str(q.get('colour') or '')
+    if colour and colour not in fx.COLOURS and not re.fullmatch(r'#[0-9a-fA-F]{6}', colour):
+        raise Bad('colour: #rrggbb or ' + ', '.join(fx.COLOURS))
+    k = long / max(W0, H0)
+    W, H = max(8, round(W0 * k)), max(8, round(H0 * k))
+    rgb = p['rgb']
+    alpha = p['alpha'] if p['alpha'] is not None else np.ones(rgb.shape[:2], np.float32)
+    try:
+        v = q['view']
+        view = (float(v[0]), float(v[1]), float(v[2]))
+    except (KeyError, TypeError, ValueError, IndexError):
+        view = pp.auto_view(alpha, (W0, H0))
+    if view[2] <= 1:
+        raise Bad('view: too small')
+    key = (style, W, H, view, frames, colour, id(p['alpha']))
+    if p.get('fx', (None,))[0] == key:
+        return p['fx'][1], style
+    rgba = pp.frame(rgb, alpha, view, (W, H))
+    if rgba[..., 3].max() < 128:
+        raise Bad('Nothing of the figure is in view: move the frame onto it, or redo the cut-out.')
+    fr = fx.render(rgba, style, frames, colour or None)
+    p['fx'] = (key, fr)
+    return fr, style
+
+
+HEAVY = {'/api/cutout', '/api/build', '/api/export', '/api/fx'}
 
 
 def api(path: str, q: dict) -> tuple[str, bytes, dict]:
@@ -191,7 +240,8 @@ def api(path: str, q: dict) -> tuple[str, bytes, dict]:
 
 def route(path: str, q: dict) -> tuple[str, bytes, dict]:
     if path == '/api/config':
-        return reply({'public': CFG.public, 'maxSize': CFG.max_size, 'maxOut': CFG.max_out})
+        return reply({'public': CFG.public, 'maxSize': CFG.max_size, 'maxOut': CFG.max_out,
+                      'maxFx': CFG.max_fx, 'maxFxOut': CFG.max_fx_out})
     if path == '/api/inputs':
         names = [] if CFG.public or not IN.is_dir() else sorted(f.name for f in IN.glob('*') if f.suffix.lower() in PICS)
         return 'application/json', json.dumps(names).encode(), {}
@@ -217,6 +267,7 @@ def route(path: str, q: dict) -> tuple[str, bytes, dict]:
             strokes = [(float(s[0]), float(s[1]), float(s[2]), bool(s[3])) for s in q.get('strokes') or []]
             a = pp.cutout(rgb, q.get('rect'), strokes)
         p['alpha'] = a
+        p.pop('fx', None)
         return reply({'mask': mask_png(a), 'view': pp.auto_view(a, size_of(q)), 'empty': bool(a.max() < 0.5)})
     if path == '/api/view':
         p = picture(q)
@@ -254,6 +305,28 @@ def route(path: str, q: dict) -> tuple[str, bytes, dict]:
         return 'application/zip', zbuf.getvalue(), {
             'Content-Disposition': f'attachment; filename="{name}.zip"',
             'X-Files': str(len(files)), 'X-Saved': saved}
+    if path == '/api/fx':
+        fr, style = styled(q)
+        fmt = str(q.get('format') or 'gif')
+        if fmt not in ('gif', 'webp', 'png'):
+            raise Bad('format: gif, webp or png')
+        try:
+            scale = max(1, min(8, int(q.get('scale') or 1)))
+        except (TypeError, ValueError):
+            raise Bad('scale: a whole number')
+        H, W = fr[0].shape[1:]
+        if max(W, H) * scale > CFG.max_fx_out:
+            raise Bad(f'{scale}x makes {W * scale}x{H * scale} px: too big here. Pick a smaller scale or size.')
+        data = fx.encode(fr, fmt, 16, scale)
+        name = re.sub(r'[^A-Za-z0-9_.-]+', '-', str(q.get('name') or picture(q)['name'])).strip('.-')[:60] or 'picture'
+        saved = ''
+        if q.get('save') and not CFG.public:
+            dest = OUT / name / 'fx'
+            dest.mkdir(parents=True, exist_ok=True)
+            (dest / f'{style}.{fmt}').write_bytes(data)
+            saved = str(dest.relative_to(ROOT))
+        return {'gif': 'image/gif', 'webp': 'image/webp', 'png': 'image/png'}[fmt], data, {
+            'Content-Disposition': f'attachment; filename="{name}-{style}.{fmt}"', 'X-Saved': saved}
     raise Bad(f'No such call: {path}')
 
 
