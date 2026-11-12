@@ -194,6 +194,7 @@ class Glow:
     core_fade: float = 8.0      # dots over which the hot core's orange fades to green at its edge
     grain: float = 0.2          # share of the hot core's dots turned white (and half that magenta)
     lit_floor: float = 0.3      # the least density in the figure's brightest broad light (its top tenth)
+    lit_mass: float = 0.6       # the density the brightest broad light reaches (its top few percent)
     halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
     feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
@@ -293,6 +294,9 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         q50, q90 = np.percentile(soft[body], [50, 90])
         lit_s = np.clip((soft - q50) / max(q90 - q50, 1e-3), 0, 1)
         p = np.maximum(p, P.lit_floor * lit_s * lit_s * (3 - 2 * lit_s) * body)
+        q80, q97 = np.percentile(soft[body], [80, 97])
+        top_s = np.clip((soft - q80) / max(q97 - q80, 1e-3), 0, 1)
+        p = np.maximum(p, P.lit_mass * top_s * top_s * (3 - 2 * top_s) * body)   # the very brightest a dense mass
     thr = P.order * bayer(H, W) + (1 - P.order) * rng.random((H, W), np.float32)
 
     # colour per dot: by the broad light, in zones along one ramp (blue, blue 2, green, orange,
@@ -687,6 +691,7 @@ class Dust:
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
     thick: float = 0.35         # share of motes two dots thick
+    lanes: float = 0.7          # how much the motes gather in lanes along the drift (0: evenly)
     jitter_size: float = 15.0   # how wide the regions are that stray together (dots)
     jitter: float = 18.0        # how far each mote's heading strays from its lane's (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
@@ -759,6 +764,12 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     wm = (tt + 0.15 * a + 0.5 * sil) * (0.01 + sw) * (a > 0.2) * (0.4 + 1.2 * yy / H)   # more of them lower down
     # they go in trails: a few share each starting point and path, at different times round it
     nm = int(P.motes * many)
+    if P.lanes > 0:   # they gather in lanes along the drift, with empty lanes between
+        acr = xx * -dv[1] + yy * dv[0]
+        kn = np.arange(-2, int((W + H) / 10) + 3) * 10.0
+        band = np.interp(acr - acr.min(), kn - kn[0] + 0, cv2.GaussianBlur(rng.random((len(kn), 1)).astype(np.float32), (0, 0), 1.2).ravel())
+        band = (band - band.min()) / (np.ptp(band) + 1e-6)
+        wm = wm * ((1 - P.lanes) + P.lanes * 2 * np.clip(band - 0.25, 0, 1))
     src = seed_where(wm.astype(np.float32), max(1, nm // P.trail), rng)
     k = len(src)
     ix, iy = src[:, 0].astype(int), src[:, 1].astype(int)
@@ -807,7 +818,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     fdir = (P.comb + (1 - P.comb) * sw)[..., None] * dv + ((1 - P.comb) * (1 - sw))[..., None] * fdir   # combed by the drift where it comes apart
     fdir /= np.linalg.norm(fdir, axis=-1, keepdims=True) + 1e-6
 
-    top_lit = tt > (np.percentile(tt[a > 0.5], 97) if (a > 0.5).any() else 1)
+    top_lit = tt > (np.percentile(tt[a > 0.5], 90) if (a > 0.5).any() else 1)
     fstep = np.round(fdir * 1.2).astype(int)   # the neighbouring dot along the shapes, combed by the drift where it comes apart
     fstep[(fstep[..., 0] == 0) & (fstep[..., 1] == 0)] = (1, 0)
     spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
