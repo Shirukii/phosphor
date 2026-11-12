@@ -25,12 +25,12 @@ textarea{width:100%;height:60px;background:#111;color:var(--fg);border:1px solid
 <div id="done" style="display:none;padding:16px"><b>All done, thanks.</b> <span class="mut">Claude can read your picks from this page.</span></div>
 <div id="zoom"><img id="zi"></div>
 <script>
-const P=__PAIRS__, K='pick___TAG__'; let st; try{st=JSON.parse(localStorage.getItem(K))||{}}catch(e){st={}}
+const PX=__PAIRS__, P=PX.map(p=>p[0]), EXT=Object.fromEntries(PX), K='pick___TAG__'; let st; try{st=JSON.parse(localStorage.getItem(K))||{}}catch(e){st={}}
 window.picks=st; let i=P.findIndex(p=>!st[p]); if(i<0)i=P.length;
 function save(){window.picks=st;try{localStorage.setItem(K,JSON.stringify(st))}catch(e){}}
 function show(){const done=i>=P.length; document.getElementById('done').style.display=done?'block':'none';
  if(done){document.getElementById('pos').textContent=P.length+' / '+P.length;return}
- const p=P[i]; for(const s of ['L','R'])document.getElementById(s).src=p+'_'+s+'.png';
+ const p=P[i]; for(const s of ['L','R'])document.getElementById(s).src=p+'_'+s+'.'+EXT[p];
  document.getElementById('inp').src=p+'_in.jpg'; document.getElementById('pos').textContent=(i+1)+' / '+P.length;
  document.getElementById('note').value=(st[p]&&st[p].note)||'';}
 function pick(v){if(v==='back'){i=Math.max(0,i-1);show();return} if(i>=P.length)return;

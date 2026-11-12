@@ -16,6 +16,8 @@ continuous picture onto the palette, not dots placed by rule. So:
             colour strength, off the frame's edge) and runs hot, the heat falling off round it
   colour -> heat through one ramp: black, blue, teal, salmon, pale
   dots   -> the colour pattern-dithered (Knoll, 4x4 Bayer) onto the palette
+  motion -> the picture holds; the sparse dots of the shade blink: each of them is given a fresh
+            place in the dither pattern every couple of frames, so the light stays the same
 
   phosphor_glow2.py PICTURE OUT.png [--long 540] [--invert auto|yes|no]
 """
@@ -34,6 +36,10 @@ BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
 
 @dataclass
 class Glow2:
+    frames: int = 72           # frames in the loop (1: a still)
+    fps: int = 24
+    twinkle: float = 0.5       # share of the shade's sparse dots that blink (0: the picture is still)
+    twinkle_hold: int = 2      # frames a blink lasts
     expose: float = 1.0        # how far each picture's light is brought to one level (0: as it is)
     expose_high: float = 0.9   # where the brightest light (the top half percent of the subject) is put
     expose_mid: float = 0.36   # the least the middle light (its median) is lifted to
@@ -150,8 +156,8 @@ def exposed(v: np.ndarray, P: Glow2) -> np.ndarray:
     return (v + P.expose * (out - v)).astype(np.float32)
 
 
-def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> np.ndarray:
-    """Pattern dither: per dot, n palette picks whose mix nears the target; the Bayer cell picks one."""
+def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> tuple[np.ndarray, np.ndarray]:
+    """Pattern dither: per dot, n palette picks (dark to light) whose mix nears the target, and its Bayer cell."""
     h, w, _ = target.shape
     t = target.reshape(-1, 3)
     err = np.zeros_like(t)
@@ -164,11 +170,31 @@ def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> np
     order = np.argsort(lum[picks], axis=0, kind='stable')
     picks = np.take_along_axis(picks, order, 0)
     cell = np.tile(BAYER4, (h // 4 + 1, w // 4 + 1))[:h, :w].reshape(-1)
-    return picks[cell, np.arange(t.shape[0])].reshape(h, w)
+    return picks, cell
 
 
-def glow2(rgba: np.ndarray, P: Glow2 | None = None, invert: bool | None = None) -> tuple[np.ndarray, np.ndarray]:
-    """One frame: (palette index per dot, palette)."""
+def animate(picks: np.ndarray, cell: np.ndarray, shape: tuple, P: Glow2, seed: int) -> np.ndarray:
+    """The frames: each dot takes the pick its Bayer cell names; blinking dots take a fresh cell in turn."""
+    h, w = shape
+    dots = np.arange(cell.size)
+    still = picks[cell, dots]
+    if P.frames <= 1 or not P.twinkle:
+        return np.repeat(still.reshape(1, h, w), max(P.frames, 1), 0).astype(np.uint8)
+    rng = np.random.default_rng(seed)
+    # the shade: dots whose mix holds black, so they are lit only some of the time
+    sparse = (picks == 0).any(0) & (picks != 0).any(0)
+    blink = np.where(sparse & (rng.random(cell.size) < P.twinkle))[0]
+    out = np.empty((P.frames, cell.size), np.uint8)
+    steps = -(-P.frames // P.twinkle_hold)
+    for k in range(steps):
+        f = still.copy()
+        f[blink] = picks[rng.integers(0, picks.shape[0], blink.size), blink]
+        out[k * P.twinkle_hold:(k + 1) * P.twinkle_hold] = f
+    return out.reshape(P.frames, h, w)
+
+
+def glow2(rgba: np.ndarray, P: Glow2 | None = None, invert: bool | None = None, seed: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """The clip: (frames of palette indices (N, H, W), palette)."""
     P = P or Glow2()
     v0 = light(rgba, invert)
     v = exposed(v0, P)
@@ -190,7 +216,8 @@ def glow2(rgba: np.ndarray, P: Glow2 | None = None, invert: bool | None = None) 
     xs = np.array([s for s, _ in P.ramp], np.float32)
     cs = np.array([c for _, c in P.ramp], np.float32)
     target = np.stack([np.interp(heat, xs, cs[:, k]) for k in range(3)], -1).astype(np.float32)
-    return knoll(target, PALETTE, P.spread), PALETTE.astype(np.uint8)
+    picks, cell = knoll(target, PALETTE, P.spread)
+    return animate(picks, cell, heat.shape, P, seed), PALETTE.astype(np.uint8)
 
 
 def frame(img: Image.Image, long: int) -> np.ndarray:
@@ -198,16 +225,35 @@ def frame(img: Image.Image, long: int) -> np.ndarray:
     return np.asarray(img.convert('RGBA').resize((round(img.width * k), round(img.height * k)), Image.LANCZOS))
 
 
+def save(fr: tuple[np.ndarray, np.ndarray], out: str, fps: int = 24, scale: int = 2) -> None:
+    """The clip as a file by its ending: .png (a still, or a loop when it has frames: APNG), .gif, .webp."""
+    idx, pal = fr
+    flat = np.zeros(768, np.uint8)
+    flat[:pal.size] = pal.ravel()
+    ims = []
+    for f in idx:
+        im = Image.fromarray(f, 'P')
+        im.putpalette(flat.tolist())
+        ims.append(im.resize((im.width * scale, im.height * scale), Image.NEAREST))
+    if len(ims) == 1:
+        ims[0].convert('RGB').save(out)
+    elif out.endswith('.webp'):
+        ims[0].save(out, save_all=True, append_images=ims[1:], loop=0, duration=round(1000 / fps), lossless=True, method=1)
+    else:
+        ims[0].save(out, save_all=True, append_images=ims[1:], loop=0, duration=round(1000 / fps), disposal=1)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('picture')
-    ap.add_argument('out')
+    ap.add_argument('out', help='.png for a still, .webp or .gif for the loop')
     ap.add_argument('--long', type=int, default=540)
     ap.add_argument('--invert', default='auto', choices=['auto', 'yes', 'no'])
+    ap.add_argument('--frames', type=int)
     a = ap.parse_args()
-    idx, pal = glow2(frame(Image.open(a.picture), a.long), invert={'auto': None, 'yes': True, 'no': False}[a.invert])
-    im = Image.fromarray(pal[idx])
-    im.resize((im.width * 2, im.height * 2), Image.NEAREST).save(a.out)
+    P = Glow2()
+    P.frames = a.frames or (1 if a.out.endswith('.png') else P.frames)
+    save(glow2(frame(Image.open(a.picture), a.long), P, {'auto': None, 'yes': True, 'no': False}[a.invert]), a.out, P.fps)
 
 
 if __name__ == '__main__':

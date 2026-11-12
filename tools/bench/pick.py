@@ -2,7 +2,8 @@
 """A blind picker page for the user: pairs shown left and right in a shuffled order.
 
   pick.py TAG SPEC     SPEC is a text file, one pair per line: name|top picture|picture A|picture B
-                       (the top picture is what both are judged against: the input, or a reference)
+                       (the top picture is what both are judged against: the input, or a reference;
+                       A and B are stills, or loops as .webp or .gif)
 
 Writes out/pick_TAG/ (served by the "picks" entry of .claude/launch.json at
 http://localhost:8351/pick_TAG/) and the key to out/bench/keys/pick_TAG.json. The picks are
@@ -10,6 +11,7 @@ kept in the page's localStorage under pick_TAG.
 """
 import json
 import random
+import shutil
 import sys
 from pathlib import Path
 
@@ -33,10 +35,16 @@ def main() -> None:
         Image.open(top).convert('RGB').save(out / f'{k}_in.jpg', quality=92, subsampling=0)
         swap = swaps[i]
         left, right = (b, a) if swap else (a, b)
-        Image.open(left).convert('RGB').save(out / f'{k}_L.png')
-        Image.open(right).convert('RGB').save(out / f'{k}_R.png')
+        ext = Path(left).suffix.lstrip('.')
+        if ext in ('webp', 'gif'):   # loops are shown as they are
+            shutil.copy(left, out / f'{k}_L.{ext}')
+            shutil.copy(right, out / f'{k}_R.{ext}')
+        else:
+            ext = 'png'
+            Image.open(left).convert('RGB').save(out / f'{k}_L.png')
+            Image.open(right).convert('RGB').save(out / f'{k}_R.png')
         key[k] = {'name': name, 'L': 'B' if swap else 'A', 'R': 'A' if swap else 'B'}
-        pairs.append(k)
+        pairs.append([k, ext])
     keys = ROOT / 'out' / 'bench' / 'keys'
     keys.mkdir(parents=True, exist_ok=True)
     (keys / f'pick_{tag}.json').write_text(json.dumps(key, indent=1))
