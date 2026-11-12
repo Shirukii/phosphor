@@ -4,7 +4,7 @@
     phosphor_fx.py PICTURE [--style glow|streak|dust|all] [--long N] [--scale N] [--frames N] [--fps N]
                    [--cutout] [--colour C] [--angle DEG] [--seed N] [--out DIR] [--formats gif,webp,png]
 
-  glow    seven colours on black, ordered-dithered: a sparse field of blue dots in the shade,
+  glow    eight colours on black, dithered: a sparse field of blue dots in the shade (dim navy at its faintest),
           green, orange and white in zones where the light gathers, contours in salmon, orange,
           blue and pink, pink on the dark side of edges, and a rim of thin parallel lines round
           the figure. The shape holds still while light and sparks run through it in slanted
