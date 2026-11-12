@@ -199,7 +199,7 @@ class Glow:
     halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
     feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
-    hot: float = 0.025          # share of the figure, its brightest broad light, coloured in calm bands
+    hot: float = 0.01           # share of the figure, its brightest broad light, coloured in calm bands
     core: float = 0.05          # share of the figure, its brightest, that may go near solid
     most: float = 0.95          # the densest the dots get: the brightest light near solid
     even: float = 0.25          # how much of the locally evened light (CLAHE) the tone takes
