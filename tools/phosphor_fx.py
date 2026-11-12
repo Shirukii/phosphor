@@ -752,6 +752,7 @@ class Dust:
     most: float = 0.55          # the densest the specks get, in the brightest light
     clump: float = 1.0          # how much the specks clump (0: even white noise): grains, not a sieve
     clump_size: float = 0.5     # the blur that clumps them (dots): finer keeps small features
+    grain_wide: float = 1.0     # how much wider than tall the grains are (1: round)
     lone: float = 1.0           # share of specks touching no other at their sides that go
     outline: float = 0.6        # how much of the silhouette and strongest edges is drawn as bright strokes
     dust_floor: float = 0.1     # the least density in the intact figure (a cut-out only): its shade doesn't go black
@@ -849,7 +850,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     def flat_noise():
         n = rng.random((H, W)).astype(np.float32)
         if P.clump > 0:
-            n = (1 - P.clump) * n + P.clump * cv2.GaussianBlur(n, (0, 0), P.clump_size)
+            n = (1 - P.clump) * n + P.clump * cv2.GaussianBlur(n, (0, 0), P.clump_size * P.grain_wide, sigmaY=P.clump_size)
             n = (np.argsort(np.argsort(n, axis=None)).reshape(H, W) / n.size).astype(np.float32)
         return n
 
@@ -1110,6 +1111,7 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
     P = STYLES[style][1]()
     if flat and isinstance(P, Dust):
         P.flat = True
+        P.grain_wide = 2.0   # flat dust art's grains run level
     if frames:
         P.frames = frames
     if colour and isinstance(P, (Streak, Dust)):
