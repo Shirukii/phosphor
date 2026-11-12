@@ -668,10 +668,11 @@ class Dust:
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
-    mote_len: tuple[int, int] = (3, 8)   # dots in a mote: a short dash along its way
+    mote_len: tuple[int, int] = (4, 10)  # dots in a mote: a short dash along its way
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
     thick: float = 0.35         # share of motes two dots thick
+    jitter_size: float = 15.0   # how wide the regions are that stray together (dots)
     jitter: float = 18.0        # how far each mote's heading strays from its lane's (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
     comb: float = 0.6           # how far the flecks lie along the drift, not the shapes, inside the figure
@@ -764,7 +765,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     swob = rng.random(k).astype(np.float32) * 6.283           # and a slow wave across the way they go
     mv, far, bend, wob = sv[who], sfar[who], sbend[who], swob[who]
     if P.jitter > 0:   # each its own heading, a little off its lane's: not blinds
-        jn = cv2.GaussianBlur(rng.normal(0, 1, (H, W)).astype(np.float32), (0, 0), 15)   # smooth: neighbours run together
+        jn = cv2.GaussianBlur(rng.normal(0, 1, (H, W)).astype(np.float32), (0, 0), P.jitter_size)   # smooth: neighbours run together
         jn = jn / (jn.std() + 1e-6) * math.radians(P.jitter)
         q = np.clip(np.round(m0).astype(int), 0, [W - 1, H - 1])
         ja = (jn[q[:, 1], q[:, 0]] + rng.normal(0, math.radians(P.jitter) * 0.15, n)).astype(np.float32)
@@ -786,7 +787,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     fdir = (P.comb + (1 - P.comb) * sw)[..., None] * dv + ((1 - P.comb) * (1 - sw))[..., None] * fdir   # combed by the drift where it comes apart
     fdir /= np.linalg.norm(fdir, axis=-1, keepdims=True) + 1e-6
 
-    fstep = np.round(np.stack([A['tx'], A['ty']], -1) * 1.2).astype(int)   # the neighbouring dot along the shapes
+    fstep = np.round(fdir * 1.2).astype(int)   # the neighbouring dot along the shapes, combed by the drift where it comes apart
     fstep[(fstep[..., 0] == 0) & (fstep[..., 1] == 0)] = (1, 0)
     spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
     sph, sln = rng.random(len(spk)), rng.integers(2, 7, len(spk))   # a few long-armed, most small
