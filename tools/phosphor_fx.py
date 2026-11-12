@@ -694,13 +694,14 @@ class Dust:
     dissolve: float = 0.97      # how much of the far side's body is gone (to motes)
     spare_lit: bool = True      # drift the other way if the far side holds the most light
     side: float = 0.7           # how much of the figure, from its far side along the angle, dissolves
-    motes: int = 3500           # particles drifting off it
+    motes: int = 2500           # particles drifting off it
     reach: int = 220            # how far they go in a loop, in dots
     trail: int = 16             # motes to a trail, following one another
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
-    mote_len: tuple[int, int] = (3, 8)  # dots in a mote: a short dash along its way
+    specks_glint: int = 40      # small glints out in the drift, each twinkling for part of the loop
+    mote_len: tuple[int, int] = (2, 6)  # dots in a mote: a short dash along its way
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
     thick: float = 0.2          # share of motes two dots thick
@@ -837,6 +838,12 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
     sph, sln = rng.random(len(spk)), rng.integers(2, 7, len(spk))   # a few long-armed, most small
     sln = np.minimum(sln, rng.integers(2, 7, len(spk)))
+    if n and P.specks_glint > 0:   # small glints where the motes go, out in the drift
+        gi = rng.choice(n, min(n, int(round(P.specks_glint * many))), replace=False)
+        gpos = m0[gi] + mv[gi] * (far[gi] * rng.uniform(0.15, 0.6, len(gi)))[:, None]
+        gph, garm, glev = rng.random(len(gi)), rng.integers(1, 3, len(gi)), rng.integers(NL - 2, NL, len(gi))
+    else:
+        gpos = np.zeros((0, 2), np.float32); gph = garm = glev = np.zeros(0)
     inner = cv2.erode((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & (sw < 0.3)
     off_near = cv2.dilate((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     out = np.zeros((P.frames, H, W), np.uint8)
@@ -913,6 +920,12 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             n_, lab, st, _ = cv2.connectedComponentsWithStats((img > 0).astype(np.uint8), connectivity=8)
             crumb = (st[:, 4] < 3); crumb[0] = False
             img[crumb[lab] & ~off_near] = 0
+        for (gx_, gy_), gp, ga, gl in zip(gpos, gph, garm, glev):   # after the crumbs go: they are tiny
+            ph_ = np.mod(s - gp, 1)
+            if ph_ < 0.35:
+                arm = 1 if ph_ < 0.07 or ph_ > 0.28 else int(ga)
+                pts = [(gx_, gy_)] + [(gx_ + d * j, gy_) for d in (-1, 1) for j in range(1, arm + 1)] + [(gx_, gy_ + d * j) for d in (-1, 1) for j in range(1, arm + 1)]
+                plot(img, np.float32(pts), np.uint8([int(gl) + 1] + [int(gl)] * (len(pts) - 1)))
         out[f] = img
     return out, pal
 
