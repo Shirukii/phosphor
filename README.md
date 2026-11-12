@@ -73,7 +73,7 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
 
 `tools/phosphor_fx.py` draws a picture as a loop of dots on black, in one of three styles:
 
-- **glow:** seven colours, ordered-dithered on a fine grid: sparse blue dots in the shade, green,
+- **glow:** eight colours, dithered on a fine grid: sparse blue dots in the shade fading to dim navy, green,
   orange and white in zones where the light gathers, contours in salmon, orange, blue and pink, pink
   on the dark side of edges, and a rim of thin parallel lines round the figure. The shape holds
   still; light and sparks run through it in slanted streaks, and bundles of lines grow out of its
