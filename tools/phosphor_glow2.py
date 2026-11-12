@@ -34,7 +34,7 @@ BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
 
 @dataclass
 class Glow2:
-    expose: float = 0.0        # how far each picture's light is brought to one level (0: as it is; off until picked)
+    expose: float = 1.0        # how far each picture's light is brought to one level (0: as it is)
     expose_high: float = 0.9   # where the brightest light (the top half percent of the subject) is put
     expose_mid: float = 0.36   # the least the middle light (its median) is lifted to
     black: float = 0.3        # light below this is black
