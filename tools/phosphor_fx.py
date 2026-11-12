@@ -207,7 +207,7 @@ class Glow:
     even: float = 0.25          # how much of the locally evened light (CLAHE) the tone takes
     sharpen: float = 1.0        # unsharp amount: the halo along edges
     radius: float = 1.6         # and its radius (dots)
-    order: float = 0.5          # ordered (Bayer) against random dither: 1 all ordered
+    order: float = 0.8          # ordered (Bayer) against random dither: 1 all ordered
     lattice: float = 0.25        # how far the dither follows a 2x2 Bayer lattice: checkered mid-tones
     cross: float = 0.7          # how much the random dither's noise is shared with the dots beside, above and below
     hue: float = 0.02           # how much neighbouring dots' colours scatter
@@ -219,7 +219,7 @@ class Glow:
     focus_size: float = 0.12     # how broad that main light is, as a share of the frame
     edge_hue: float = 0.05      # how far fine edges push the colour up the ramp
     lines: float = 0.15         # how much of the contours is drawn as a line
-    rim: float = 0.4            # how dense the rim lines are
+    rim: float = 0.15           # how dense the rim lines are
     outline: float = 0.0       # how much of the unlit outline is drawn, sparse and cool
     rim_lines: int = 2          # parallel lines along a rim, a dot wide, a dot of black between
     rim_breaks: float = 0.3     # share of the rim's length left out, in stretches
@@ -258,7 +258,7 @@ class Glow:
     cap_from: float = 0.75      # rank of the light where it starts to rise
     edge_mid: float = 0.6       # how far mid-tone dots gather on edges and strokes
     whole_lit: float = 0.4      # a picture not cut out is exposed as if its brightest this share were the figure
-    specks: float = 0.06        # stray lone dots in the black round the figure, as a share of its lit dots
+    specks: float = 0.02        # stray lone dots in the black round the figure, as a share of its lit dots
     speck_reach: float = 25.0   # how far from the figure they scatter (dots)
     drip: bool = True           # the streams are drips: single dotted columns falling from the figure's lower edges
     skin: float = 1.0           # warm lit surfaces drawn as a pink/white/orange checker (0: off)
