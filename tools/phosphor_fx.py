@@ -211,6 +211,8 @@ class Glow:
     mix: float = 0.7            # how far neighbouring zones checker into each other, dot by dot
     scatter: float = 1.4        # random spread of the colour steps round the light's top end
     edge_mix: float = 0.6       # how far the hot core's edge mixes its colour with the light round it
+    focus: float = 0.3          # how far the colour gathers its warmth round the main light (0: anywhere it is bright)
+    focus_size: float = 0.12     # how broad that main light is, as a share of the frame
     edge_hue: float = 0.05      # how far fine edges push the colour up the ramp
     lines: float = 0.15         # how much of the contours is drawn as a line
     rim: float = 0.7            # how dense the rim lines are
@@ -329,6 +331,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     else:
         hot_solid = np.zeros_like(body)
     v = zone - 0.25 * feat + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
+    if P.focus > 0 and body.any():   # one or two warm places, where the broad light gathers most: the rest goes cool
+        key = cv2.GaussianBlur(zone, (0, 0), P.focus_size * max(H, W))
+        key = np.clip((key - key[body].min()) / (np.ptp(key[body]) + 1e-6), 0, 1)
+        v = v * (1 - P.focus * (1 - key))
     lit0 = thr < p
     anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
     r = np.interp(v, np.maximum.accumulate(anchors + np.arange(5) * 1e-6), np.arange(5))
