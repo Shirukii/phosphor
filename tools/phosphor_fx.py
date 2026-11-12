@@ -295,6 +295,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         q50, q95 = np.quantile(zone[body], [0.5, 0.95])
         lift = float(np.clip(((q95 - q50) / (q50 + 0.05) - 0.3) / 0.25, 0, 1))
         p = np.where((hot > 0.5) & body, np.maximum(p, P.hot_fill * lift), p)
+    if P.hot_fill * lift > 0.85:   # no holes in a solid core
+        hot_solid = (hot > 0.6) & body
+    else:
+        hot_solid = np.zeros_like(body)
     v = zone + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
     lit0 = thr < p
     anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
@@ -423,7 +427,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         if P.twinkle > 0:   # a few dots each frame take a fresh threshold: the light glitters
             tw = (rng.random((H, W)) < P.twinkle * (1 - hot)) & ~held & (p > 0.1)   # only where there is light
             th_f = np.where(tw, rng.random((H, W)), th_f)
-        lit = th_f < pf
+        lit = (th_f < pf) | hot_solid
         img = np.where(lit, col, 0).astype(np.uint8)
         u = np.mod(ph + s, 1)
         grow = np.clip(np.minimum(u * 3, (1 - u) * 3), 0, 1) * L      # out, hold, back in
@@ -620,6 +624,7 @@ class Dust:
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 5           # four-point glints on the brightest light, each for part of the loop
     mote_len: tuple[int, int] = (2, 7)   # dots in a mote: a short dash along its way
+    falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
     comb: float = 0.6           # how far the flecks lie along the drift, not the shapes, inside the figure
@@ -683,7 +688,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
 
     # the motes: born on the figure (mostly its far side), drifting off along the angle, bending
     # with the shapes they leave, fading in and out; each lives once round the loop, so it loops
-    wm = (tt + 0.15 * a + 0.5 * sil) * (0.04 + sw) * (a > 0.2) * (0.4 + 1.2 * yy / H)   # more of them lower down
+    wm = (tt + 0.15 * a + 0.5 * sil) * (0.01 + sw) * (a > 0.2) * (0.4 + 1.2 * yy / H)   # more of them lower down
     # they go in trails: a few share each starting point and path, at different times round it
     nm = int(P.motes * many)
     src = seed_where(wm.astype(np.float32), max(1, nm // P.trail), rng)
@@ -757,7 +762,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         # the motes
         u = np.mod(mph + s, 1)
         pos = m0 + mv * (far * u)[:, None] + perp * (bend * far * u * u + 3 * np.sin(wob + 6.283 * u) - 3 * np.sin(wob))[:, None]
-        fade = np.sin(np.pi * u)
+        fade = np.minimum(1, u * 8) * (1 - u) ** P.falloff   # thickest as they leave, thinning out as they go
         vel = mv * far[:, None] + perp * (2 * bend * far * u + 6 * np.pi * np.cos(wob + 6.283 * u))[:, None]
         vel /= np.linalg.norm(vel, axis=1, keepdims=True) + 1e-6   # each dash along the way it is going
         vis = rng.random(n) < fade ** 0.7                 # they fade by thinning out, each one staying crisp
