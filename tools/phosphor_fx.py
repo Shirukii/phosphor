@@ -735,39 +735,40 @@ class Streak:
     scale: int = 4
     colour: str = '#ee1111'
     gain: float = 1.0           # more or less light
-    gamma: float = 1.7          # tone curve: above 1, darker mid-tones and more contrast
+    gamma: float = 1.15         # tone curve: above 1, darker mid-tones and more contrast
     local: float = 0.5          # local contrast before the dither (light against its surroundings, 8 dots)
     most: float = 0.75          # the densest the dots get: dense in the highlights, never solid
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
-    black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
+    black: float = 0.12         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
     peak: float = 0.0           # share of the figure, its brightest, dithered near solid
     top: float = 0.05           # share of the figure, its brightest, dithered denser than `most`
-    top_most: float = 0.92      # how dense that gets at its brightest
+    top_most: float = 0.97      # how dense that gets at its brightest
+    knee: float = 0.55          # above this light the density climbs smoothly past `most` to `top_most` (0: the `top` share instead)
     features: float = 1.0       # how much darker small dark spots (eyes, mouth) go before the dither
     rim: float = 0.15           # light added along the inside of the silhouette, so it holds
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
     even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
-    jitter: float = 0.6         # threshold shake in the dither: maze-like chains, not stripes and checks
-    jitter_plain: float = 1.2   # the shake in plain tone, away from edges: looser specks, fewer touching
+    jitter: float = 0.2         # threshold shake in the dither: maze-like chains, not stripes and checks
+    jitter_plain: float = 0.3   # the shake in plain tone, away from edges: looser specks, fewer touching
     edge_pct: float = 85.0      # the edge strength (percentile in the figure) that counts as a full edge
     kernel: str = 'atkinson'    # error diffusion: 'floyd' (Floyd-Steinberg) or 'atkinson' (diagonal weave, more contrast)
-    mesh: float = 0.3           # Atkinson: how much harder a dot lights when the dot above and the one before are lit
+    mesh: float = 0.0           # Atkinson: how much harder a dot lights when the dot above and the one before are lit
     clump: float = 0.0          # in the brightest, holes from noise blurred this much (dots): loose pairs, not a grid
     plane: int = 120            # the least dots a patch of bright light needs to go near solid
-    hold: float = 0.5           # share of the figure's dots held from one dither all loop (less boil)
+    hold: float = 0.0           # share of the figure's dots held from one dither all loop (less boil)
     boil: float = 0.05          # noise added before each frame's dither: how much it boils
     stray: float = 0.0          # how much of that noise is let into the background
-    specks: float = 0.012       # loose dots over the background, more towards the bottom
+    specks: float = 0.016       # loose dots over the background, more towards the bottom
     dashes: int = 70            # short straight dashes along the shapes, each frame
     dash_len: tuple[int, int] = (3, 7)
     field: int = 40             # dashes drawing the texture the dither leaves black (waves, hair, cloth in shade)
     field_len: tuple[int, int] = (2, 5)
     rain: int = 320             # bundles of streaks across the frame
     strands: tuple[int, int] = (1, 1)   # streaks in a bundle, side by side
-    rain_len: tuple[int, int] = (20, 64)
+    rain_len: tuple[int, int] = (12, 48)
     rain_angle: float = -24     # degrees from the right, upwards negative (screen y is down)
-    rain_gaps: float = 0.18     # gaps in a streak (0: solid): dotted, broken runs
+    rain_gaps: float = 0.4      # gaps in a streak (0: solid): dotted, broken runs
     rain_alt: float = 0.1       # share of streaks with every other dot gone
 
 
@@ -808,7 +809,7 @@ def diffuse_atkinson(img: np.ndarray, jitter: float | np.ndarray = 0.0, rng=None
     rows = e.tolist()
     if np.ndim(jitter):   # a shake per dot
         jp = np.zeros((H, W + 4), np.float32); jp[:, 2:W + 2] = jitter
-        th = (0.5 + jp * (rng.random((H, W + 4)) - 0.5)).tolist()
+        th = np.maximum(0.5 + jp * (rng.random((H, W + 4)) - 0.5), 0.04).tolist()   # never below ~0: a shake past 0 lights black dots, an even sprinkle over black ground
     else:
         th = (0.5 + jitter * (rng.random((H, W + 4)) - 0.5)).tolist() if jitter > 0 else [[0.5] * (W + 4)] * H
     out = np.zeros((H, W), bool)
@@ -852,7 +853,11 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
     if P.top > 0 and (a > 0.5).any():   # the very brightest a little denser than the cap, still not solid
         qt = np.percentile(tt[a > 0.5], 100 * (1 - P.top))
         top = np.clip((tt - qt) / max(1 - qt, 1e-3), 0, 1)
-    tt = (np.where(tt < P.floor, 0, tt) * (P.most + (P.top_most - P.most) * top)).astype(np.float32)
+    if P.knee > 0:   # a shoulder: from the knee up, the light climbs past `most` to `top_most`: lit planes go near solid, the mid-tones stay as they were
+        x = np.clip((tt - P.knee) / (1 - P.knee), 0, 1)
+        tt = (np.where(tt < P.floor, 0, tt) * P.most + (P.top_most - P.most) * x * x * (3 - 2 * x)).astype(np.float32)
+    else:
+        tt = (np.where(tt < P.floor, 0, tt) * (P.most + (P.top_most - P.most) * top)).astype(np.float32)
     if P.smooth > 0:   # the source's fine grain out first, or the diffusion draws it as blotches
         tt = cv2.GaussianBlur(tt, (0, 0), P.smooth)
     if P.features > 0:   # eyes, nostrils, mouth: small dark spots go darker, so they read as holes
