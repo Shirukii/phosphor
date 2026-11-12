@@ -190,6 +190,7 @@ class Glow:
     solid: float = 0.2          # share of the figure lit near solid (picks the curve per picture; 0: use gamma)
     gamma: float = 3.0          # tone curve (higher: the shade empties out more)
     fill: float = 0.65          # the densest the dots get outside the brightest light
+    halo: float = 0.2           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
     feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
     hot: float = 0.05           # share of the figure, its brightest broad light, coloured in calm bands
@@ -283,6 +284,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     if body.mean() > 0.97:   # nothing cut out: the dim background isn't the figure's shade
         shade_min = max(shade_min, float(np.percentile(soft, 50)))
     p = np.maximum(p, P.floor * (a > 0.5) * (soft > shade_min))   # the dark of the figure keeps a sparse blue dither
+    p = np.maximum(p, P.halo * np.clip((soft - 0.12) / 0.25, 0, 1) * (a > 0.5) * (soft > shade_min))   # the mid-tones fade out, not cut to black
     thr = P.order * bayer(H, W) + (1 - P.order) * rng.random((H, W), np.float32)
 
     # colour per dot: by the broad light, in zones along one ramp (blue, blue 2, green, orange,
@@ -466,6 +468,7 @@ class Streak:
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
+    peak: float = 0.06          # share of the figure, its brightest, dithered near solid
     features: float = 1.0       # how much darker small dark spots (eyes, mouth) go before the dither
     rim: float = 0.15           # light added along the inside of the silhouette, so it holds
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
@@ -523,6 +526,9 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
     tt = np.clip(P.gain * np.clip((t - P.black) / (1 - P.black), 0, 1) ** P.gamma, 0, 1)
     if (a > 0.5).any():   # the brightest of the figure at full light, whatever the picture
         tt = np.clip(tt / max(np.percentile(tt[a > 0.5], 99), 0.3), 0, 1)
+    if P.peak > 0 and (a > 0.5).any():   # the brightest light near solid, as on a hat brim or a lit cheek
+        q = np.percentile(tt[a > 0.5], 100 * (1 - P.peak))
+        tt = np.where(tt > q, np.maximum(tt, np.clip(0.88 + (tt - q) / max(1 - q, 1e-3), 0, 1)), tt)
     tt = (np.where(tt < P.floor, 0, tt) * P.most).astype(np.float32)
     if P.smooth > 0:   # the source's fine grain out first, or the diffusion draws it as blotches
         tt = cv2.GaussianBlur(tt, (0, 0), P.smooth)
@@ -646,7 +652,7 @@ class Dust:
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 5           # four-point glints on the brightest light, each for part of the loop
-    mote_len: tuple[int, int] = (3, 10)  # dots in a mote: a short dash along its way
+    mote_len: tuple[int, int] = (3, 8)   # dots in a mote: a short dash along its way
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
@@ -732,7 +738,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         c, s_ = np.cos(ang)[:, None], np.sin(ang)[:, None]
         sv = np.concatenate([sv[:, :1] * c - sv[:, 1:] * s_, sv[:, :1] * s_ + sv[:, 1:] * c], 1)
     sv /= np.linalg.norm(sv, axis=1, keepdims=True) + 1e-6
-    sfar = (P.reach * math.sqrt(many) * rng.uniform(0.4, 1, k) * (0.4 + 0.6 * sw[iy, ix])).astype(np.float32)
+    sfar = (P.reach * math.sqrt(many) * rng.uniform(0.4, 1, k) * np.where(rng.random(k) < 0.15, rng.uniform(1.5, 2.5, k), 1) * (0.4 + 0.6 * sw[iy, ix])).astype(np.float32)
     sbend = rng.normal(0, P.bend, k).astype(np.float32)     # a slow drift sideways too: the lanes curve
     who = rng.integers(0, k, nm) if len(src) else np.zeros(0, int)
     n = len(who)
@@ -768,7 +774,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             lev = np.clip(np.round((1 - P.shade_lev) * lev + P.shade_lev * (1.5 + (NL - 1) * np.sqrt(tt))), 1, NL).astype(int)
         if P.outline > 0:   # the silhouette and strongest edges as bright strokes; stray dim specks go
             lit &= ~((lev <= 3) & (cv2.filter2D(lit.astype(np.uint8), -1, k8, borderType=cv2.BORDER_CONSTANT) == 0))
-            stroke = rim & (rng.random((H, W)) < P.outline)
+            stroke = rim & (rng.random((H, W)) < P.outline * (1 - 0.8 * sw))   # thinning where the figure comes apart
             lit |= stroke
             lev = np.where(stroke, NL - rng.integers(0, 2, (H, W)), lev)
         img = np.where(lit, lev, 0).astype(np.uint8)
