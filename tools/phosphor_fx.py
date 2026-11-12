@@ -233,7 +233,7 @@ class Glow:
     flow_width: float = 0.8     # and how wide (px, soft): thin sweeps
     sparks: float = 0.04        # share of the scrolling field lit as sparks running through the light
     tilt: float = -20           # the flow's slant from the angle (degrees)
-    streams: int = 20           # bundles of lines streaming out of the picture
+    streams: int = 16           # bundles of lines streaming out of the picture
     strands: tuple[int, int] = (1, 4)   # lines in a bundle, 2 dots apart
     stream_len: tuple[int, int] = (30, 120)  # dots in one, at its longest
     angle: float = 0            # the way they go (degrees: 0 right, 90 down)
@@ -460,7 +460,12 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     base = col[sy, sx].copy()                                     # the colour of the light it leaves
     base[(base >= ORANGE) & (rng.random(len(bi)) < 0.8)] = BLUE2  # mostly cool all the same
     runs = np.where(rng.random((len(bi), P.stream_len[1] + 2)) < 0.25, nbr[base][:, None], base[:, None]).astype(np.uint8)
-    step = rng.choice([2, 3], len(bi), p=[0.8, 0.2])   # dotted, never a solid bar
+    # dotted, never a solid bar, and never an even dot-gap-dot either: each line its own uneven spacing
+    gaps = rng.choice([1, 2, 3], (len(bi), P.stream_len[1] + 2), p=[0.3, 0.45, 0.25]).cumsum(1)
+    dotted = np.zeros((len(bi), P.stream_len[1] + 4), bool)
+    for k_ in range(gaps.shape[1]):
+        ok_ = gaps[:, k_] < dotted.shape[1]
+        dotted[np.nonzero(ok_)[0], gaps[ok_, k_]] = True
     # the flow: a streaky field, periodic along the angle so it scrolls round in one loop
     Lu, Lv = max(8, int(round(P.flow_speed * P.frames))), 256
     fld = cv2.GaussianBlur(np.tile(rng.random((Lv, Lu)).astype(np.float32), (3, 3)), (0, 0), sigmaX=P.flow_len,
@@ -499,7 +504,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         u = np.mod(ph + s, 1)
         grow = np.clip(np.minimum(u * 3, (1 - u) * 3), 0, 1) * L      # out, hold, back in
         for j in range(P.stream_len[1]):
-            on = (j < grow) & (j % step == 0)
+            on = (j < grow) & dotted[:, j]
             plot(img, (lsrc + ldv * j)[on], runs[on, j])
         out[f] = img
     return out, pal
