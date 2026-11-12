@@ -14,7 +14,7 @@
           every frame so it boils, short dashes along its shapes (and over the texture of its
           shaded parts, which the dither leaves black), loose specks gathering towards the bottom,
           and slanted rain flashing up in new places every frame.
-  dust    grey specks on an ordered dither, brighter in the light, the outline and strongest edges
+  dust    grey specks in small grains, brighter in the light, the outline and strongest edges
           as bright strokes, short flecks along the shapes and a few glints; from its darker side
           along --angle the figure comes apart in lanes of dashes that drift off and fade.
 

@@ -82,7 +82,7 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
   figure boils, short dashes along its shapes (and drawing the texture of its shaded parts, where
   the dither leaves black), clean black round it but for loose specks gathering towards the bottom, and slanted rain
   flashing up in new places every frame. 1 s at 24 fps.
-- **dust:** grey specks on an ordered dither, brighter where the light is, the outline and the
+- **dust:** grey specks gathered in small grains, brighter where the light is, with a faint haze round them, the outline and the
   strongest edges drawn as bright strokes, with short flecks along the shapes and a few glints;
   from its darker side (along `--angle`) the figure comes apart in curving lanes of dashes that
   drift off and fade. 2 s at 24 fps.
