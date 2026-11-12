@@ -175,8 +175,8 @@ def hex_rgb(h: str) -> tuple[int, int, int]:
 # ---- glow
 
 # measured off the references: two blues carry two thirds of the lit dots
-GLOW_PALETTE = ['#000000', '#3e72b4', '#2c75dc', '#59c077', '#e0904c', '#ae56a8', '#faf5f3', '#e88674']
-BLUE, BLUE2, GREEN, ORANGE, MAGENTA, WHITE, SALMON = range(1, 8)
+GLOW_PALETTE = ['#000000', '#3e72b4', '#2c75dc', '#59c077', '#e0904c', '#ae56a8', '#faf5f3', '#e88674', '#030634']
+BLUE, BLUE2, GREEN, ORANGE, MAGENTA, WHITE, SALMON, NAVY = range(1, 9)
 
 
 @dataclass
@@ -238,6 +238,7 @@ class Glow:
     stream_len: tuple[int, int] = (30, 120)  # dots in one, at its longest
     angle: float = 0            # the way they go (degrees: 0 right, 90 down)
     both: bool = True           # and the opposite way too
+    navy: float = 0.22          # share of the lit dots, the faintest shade, drawn dim navy
     palette: list = field(default_factory=lambda: list(GLOW_PALETTE))
 
 
@@ -367,6 +368,11 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         col[(hot > 0.6) & (col == ORANGE) & (gb < 0.03)] = BLUE2      # the grid broken by a few stray dots
         col[(hot > 0.6) & (col == ORANGE) & (gb > 0.98)] = MAGENTA
         col[(hot > 0.6) & (col == MAGENTA) & (dark_side == 0)] = ORANGE
+    if P.navy > 0 and lit0.any():   # the faintest shade a dim navy, barely there: the light fades out, not stops
+        nb_ = lit0 & (col == BLUE)
+        if nb_.any():
+            cut = np.quantile(v[nb_], min(1.0, P.navy * lit0.sum() / nb_.sum()))
+            col[nb_ & (v <= cut) & (rng.random((H, W)) < 0.85)] = NAVY
 
     # contours: thin continuous lines, each line one colour
     l8 = (cv2.GaussianBlur(t, (0, 0), 2.0) * 255).astype(np.uint8)
