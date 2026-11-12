@@ -218,6 +218,7 @@ class Glow:
     rim: float = 0.7            # how dense the rim lines are
     outline: float = 0.45       # how much of the unlit outline is drawn, sparse and cool
     rim_lines: int = 3          # parallel lines along a rim, a dot wide, a dot of black between
+    rim_breaks: float = 0.3     # share of the rim's length left out, in stretches
     rim_level: float = 0.985    # which edges get one (percentile of edge strength; the outline always)
     line_level: float = 0.99    # which edges count as contours (percentile of edge strength)
     ramp: tuple = (0.0, 0.3, 0.74, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
@@ -396,9 +397,12 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     bright = cv2.GaussianBlur(t, (0, 0), 4)
     bright = bright > (np.percentile(bright[a > 0.5], 55) if (a > 0.5).any() else 0.5)   # rims only where it's lit
     near = lit_side & bright & (d < 2 * P.rim_lines)
+    if P.rim_breaks > 0:   # broken into stretches, not unbroken chains round every shape
+        fr = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 5)
+        near &= fr > np.quantile(fr, P.rim_breaks)
     runs = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 1.5)   # colour in runs of a few dots
     runs = np.argsort(np.argsort(runs, axis=None)).reshape(H, W) / runs.size
-    first = np.array([ORANGE, WHITE, SALMON, MAGENTA], np.uint8)[np.digitize(runs, [0.3, 0.5, 0.72])]
+    first = np.array([ORANGE, WHITE, SALMON, MAGENTA], np.uint8)[np.digitize(runs, [0.25, 0.42, 0.8])]
     wide = cv2.GaussianBlur(rng.random((H, W)).astype(np.float32), (0, 0), 15)
     wide = np.clip(0.5 + (wide - wide.mean()) / (wide.std() + 1e-6) * 0.35, 0.15, 1)   # the rim's weight changes along it
     rows = [(first, 1.0), (SALMON, 0.85), (MAGENTA, 0.6), (BLUE2, 0.4)]
