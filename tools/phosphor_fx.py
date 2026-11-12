@@ -720,6 +720,7 @@ class Dust:
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
     specks_glint: int = 40      # small glints out in the drift, each twinkling for part of the loop
+    haze: float = 0.12          # faint dark-grey dots round the lit ones (0: none)
     mote_len: tuple[int, int] = (2, 14)  # dots in a mote, least and most: a short dash along its way
     mote_tail: float = 0.3      # how quickly long motes get rare (geometric: lower, more long ones)
     falloff: float = 1.5        # how fast motes thin out as they go
@@ -741,8 +742,9 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     H, W = t.shape
     c = np.float32(hex_rgb(P.colour))
     lv = np.float32([0, 0.2, 0.32, 0.45, 0.6, 0.8, 1.0])
-    pal = (lv[:, None] * c[None]).astype(np.uint8)
     NL = len(lv) - 1
+    pal = (np.concatenate([lv, [0.06, 0.13]])[:, None] * c[None]).astype(np.uint8)   # and two faint greys past the ramp, for the haze
+    HAZE = (NL + 1, NL + 2)
     tt = np.clip(P.gain * np.clip((t - P.black) / (1 - P.black), 0, 1) ** P.gamma, 0, 1).astype(np.float32)
     if (a > 0.5).any():   # the figure's brightest at full light, whatever the picture
         tt = np.clip(tt / max(float(np.percentile(tt[a > 0.5], 98)), 0.2), 0, 1).astype(np.float32)
@@ -949,6 +951,11 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
                 big = 0.07 <= ph_ <= 0.28
                 pts = [(gx_, gy_)] + [(gx_ + ox, gy_ + oy) for ox in (-1, 0, 1) for oy in (-1, 0, 1) if (ox or oy) and (big or ox == 0 or oy == 0) and rng.random() < 0.75]
                 plot(img, np.float32(pts), np.uint8([int(gl)] + [int(rng.integers(2, int(gl))) for _ in pts[1:]]))
+        if P.haze > 0:   # a faint dark-grey haze hugging the lit dots, a dot or two out: the specks glow
+            hz = cv2.GaussianBlur((img > 0).astype(np.float32), (0, 0), 1.2)
+            hr = rng.random((H, W))
+            on = (img == 0) & (hr < P.haze * np.clip(hz * 2, 0, 1))
+            img[on] = np.where(hr[on] < P.haze * np.clip(hz[on] * 2, 0, 1) * 0.4, HAZE[1], HAZE[0])
         out[f] = img
     return out, pal
 
