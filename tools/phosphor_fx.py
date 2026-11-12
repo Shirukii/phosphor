@@ -196,7 +196,7 @@ class Glow:
     order: float = 0.55         # ordered (Bayer) against random dither: 1 all ordered
     hue: float = 0.1            # how much neighbouring dots' colours scatter
     zones: float = 10.0         # how broad the light is that sets the colour (dots)
-    dense_mix: float = 0.0      # more scatter where the dots are dense: masses shimmer in several hues
+    dense_mix: float = 0.25     # more scatter where the dots are dense: masses shimmer in several hues
     mix: float = 0.7            # how far neighbouring zones checker into each other, dot by dot
     edge_hue: float = 0.05      # how far fine edges push the colour up the ramp
     lines: float = 0.15         # how much of the contours is drawn as a line
@@ -205,7 +205,7 @@ class Glow:
     rim_lines: int = 2          # parallel lines along a rim, a dot wide, a dot of black between
     rim_level: float = 0.985    # which edges get one (percentile of edge strength; the outline always)
     line_level: float = 0.99    # which edges count as contours (percentile of edge strength)
-    ramp: tuple = (0.0, 0.3, 0.8, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
+    ramp: tuple = (0.0, 0.3, 0.8, 0.965, 0.99)  # rank among lit dots where blue, blue 2, green, orange, white sit
     floor: float = 0.05         # the least light in the figure: its shade never quite goes black
     fringe: float = 0.8         # magenta on the dark side of bright edges
     warmth: float = 0.15        # how far the picture's own warm light leans to orange
@@ -425,11 +425,12 @@ class Streak:
     colour: str = '#ee1111'
     gain: float = 1.0           # more or less light
     gamma: float = 2.1          # tone curve: above 1, darker mid-tones and more contrast
-    most: float = 0.85          # the densest the dots get: the highlights stay a dither, not a slab
+    most: float = 0.92          # the densest the dots get: near solid in the highlights
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
+    even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
     hold: float = 0.5           # share of the figure's dots held from one dither all loop (less boil)
     boil: float = 0.05          # noise added before each frame's dither: how much it boils
     stray: float = 0.0          # how much of that noise is let into the background
@@ -445,10 +446,35 @@ class Streak:
     rain_gaps: float = 0.2      # gaps in a streak (0: solid): dotted, broken runs
 
 
+def diffuse(img: np.ndarray) -> np.ndarray:
+    """Floyd-Steinberg error diffusion, serpentine (each row the other way), so the dots run no
+    one way: plain left-to-right scanning spaces them out across and stacks them up and down."""
+    H, W = img.shape
+    e = np.zeros((H + 1, W + 2), np.float32)
+    e[:H, 1:W + 1] = img
+    rows = e.tolist()
+    out = np.zeros((H, W), bool)
+    for y in range(H):
+        r0, r1 = rows[y], rows[y + 1]
+        if y % 2 == 0:
+            xs, d = range(1, W + 1), 1
+        else:
+            xs, d = range(W, 0, -1), -1
+        for x in xs:
+            v = r0[x]
+            if v >= 0.5:
+                out[y, x - 1] = True
+                v -= 1
+            if v:
+                r0[x + d] += v * 0.4375; r1[x - d] += v * 0.1875; r1[x] += v * 0.3125; r1[x + d] += v * 0.0625
+    return out
+
+
 def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
     P = P or Streak()
     rng = np.random.default_rng(seed)
-    t, a = A['tone'], A['alpha']
+    a = A['alpha']
+    t = (1 - P.even) * A['plain'] + P.even * A['tone']   # some of the plain light: real shadows stay dark
     H, W = t.shape
     c = np.float32(hex_rgb(P.colour))
     pal = np.array([[0, 0, 0], c * 0.62, c * 0.8, c], np.uint8)       # three shades of the one colour
@@ -495,7 +521,7 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         o = f % 4                       # Floyd-Steinberg runs one way: turn it each frame so no direction shows
         nz = noisy.T if o & 2 else noisy
         nz = nz[:, ::-1] if o & 1 else nz
-        bits = np.asarray(Image.fromarray(np.ascontiguousarray(nz * 255).astype(np.uint8), 'L').convert('1'), bool)
+        bits = diffuse(np.ascontiguousarray(nz))
         bits = bits[:, ::-1] if o & 1 else bits
         bits = bits.T if o & 2 else bits
         if P.hold > 0:   # some of the figure holds still all loop: it shimmers rather than boils
@@ -562,6 +588,7 @@ class Dust:
     fleck_len: tuple[int, int] = (2, 3)
     angle: float = 0            # the way the dust drifts off (degrees: 0 right, 90 down)
     dissolve: float = 0.97      # how much of the far side's body is gone (to motes)
+    spare_detail: bool = True   # drift the other way if the far side holds the most detail
     side: float = 0.7           # how much of the figure, from its far side along the angle, dissolves
     motes: int = 5000           # particles drifting off it
     reach: int = 220            # how far they go in a loop, in dots
@@ -597,6 +624,14 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     else:
         lo, hi = proj.min(), proj.max()
     pn = np.clip((proj - lo) / max(hi - lo, 1), 0, 1)
+    if P.spare_detail and inside.any():   # the side with more detail (a face, say) stays; the other goes
+        g = A['edge'] * inside
+        far, near = float((g * (pn > 0.5)).sum()), float((g * (pn <= 0.5)).sum())
+        if far > 1.25 * near:
+            dv = -dv
+            proj = -proj
+            lo, hi = -hi, -lo
+            pn = np.clip((proj - lo) / max(hi - lo, 1), 0, 1)
     sw = (np.clip((pn - (1 - P.side)) / max(P.side, 1e-3), 0, 1) ** 1.3 * (a > 0.2)).astype(np.float32)
     ed = A['edge'] * np.clip(A['plain'] * 4, 0, 1) * (a > 0.5)
     sil = cv2.GaussianBlur(np.hypot(cv2.Sobel(a, cv2.CV_32F, 1, 0), cv2.Sobel(a, cv2.CV_32F, 0, 1)), (0, 0), 0.7)
