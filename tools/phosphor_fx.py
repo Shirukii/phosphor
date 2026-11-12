@@ -319,12 +319,12 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     col = ramp[np.clip(np.floor(r + P.mix * (bayer(H, W) - 0.5)), 0, 4).astype(int)]   # zones, checkered where they meet
     col[(col == BLUE2) & (r < 1.2 + P.mix) & (rng.random((H, W)) < 0.5)] = BLUE   # the two blues mingle
     col[(rng.random((H, W)) < P.fringe * dark_side)] = MAGENTA          # purple just off bright edges
-    if P.grain > 0:   # the hot core's orange grained with white and a little magenta, not clean bands
-        gr = rng.random((H, W))
+    if P.grain > 0:   # the hot core's orange grained with white on a fine lattice, not clean bands
         core_o = (hot > 0.5) & (col >= GREEN) & (col != MAGENTA)
-        col[core_o & (gr < P.grain)] = WHITE
-        col[core_o & (gr >= P.grain) & (gr < 1.5 * P.grain)] = MAGENTA
-        col[core_o & (col == GREEN) & (gr > 1 - P.grain)] = ORANGE   # less green inside it
+        gy, gx = np.mgrid[0:H, 0:W]
+        lat = ((gx % 2) == 1) & ((gy % 2) == 1)
+        col[core_o & lat & (rng.random((H, W)) < P.grain * 4 * hot)] = WHITE
+        col[(hot > 0.6) & (col == MAGENTA) & (dark_side == 0)] = ORANGE
 
     # contours: thin continuous lines, each line one colour
     l8 = (cv2.GaussianBlur(t, (0, 0), 2.0) * 255).astype(np.uint8)
@@ -654,7 +654,7 @@ class Dust:
     trail: int = 16             # motes to a trail, following one another
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
-    sparkles: int = 5           # four-point glints on the brightest light, each for part of the loop
+    sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
     mote_len: tuple[int, int] = (3, 8)   # dots in a mote: a short dash along its way
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
@@ -774,7 +774,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     fdir /= np.linalg.norm(fdir, axis=-1, keepdims=True) + 1e-6
 
     spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
-    sph, sln = rng.random(len(spk)), rng.integers(2, 4, len(spk))
+    sph, sln = rng.random(len(spk)), rng.integers(2, 7, len(spk))   # a few long-armed, most small
+    sln = np.minimum(sln, rng.integers(2, 7, len(spk)))
     inner = cv2.erode((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & (sw < 0.3)
     off_near = cv2.dilate((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     out = np.zeros((P.frames, H, W), np.uint8)
@@ -827,9 +828,9 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             plot(img, pts[ok], lvv[ok])
         # sparkles: a few four-point glints on the brightest light, each lit for part of the loop
         for (sx, sy), sp, sl in zip(spk, sph, sln):
-            on = np.mod(s - sp, 1) < 0.25
-            if on:
-                arm = sl if np.mod(s - sp, 1) < 0.15 else max(1, sl - 1)
+            ph_ = np.mod(s - sp, 1)
+            if ph_ < 0.5:   # lit half the loop, swelling and shrinking
+                arm = max(1, int(round(sl * math.sin(math.pi * ph_ / 0.5))))
                 pts = [(sx, sy)] + [(sx + d * j, sy) for d in (-1, 1) for j in range(1, arm + 1)] + [(sx, sy + d * j) for d in (-1, 1) for j in range(1, arm + 1)]
                 lv8 = [NL] + [NL - 1] * (len(pts) - 1)
                 plot(img, np.float32(pts), np.uint8(lv8))
