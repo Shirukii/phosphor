@@ -190,6 +190,7 @@ class Glow:
     solid: float = 0.2          # share of the figure lit near solid (picks the curve per picture; 0: use gamma)
     gamma: float = 3.0          # tone curve (higher: the shade empties out more)
     fill: float = 0.65          # the densest the dots get outside the brightest light
+    core_halo: float = 0.25     # density added round the hot core, fading over about 8 dots
     core_fade: float = 8.0      # dots over which the hot core's orange fades to green at its edge
     grain: float = 0.2          # share of the hot core's dots turned white (and half that magenta)
     halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
@@ -308,6 +309,9 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     sparse = (cv2.blur((thr < p).astype(np.float32), (15, 15)) < 0.4) & (A['coh'] < 0.4)   # not over busy texture
     p = np.where(feat & sparse & ~(hot > 0.5), np.maximum(p, P.feat_fill * np.clip(soft * 4, 0, 1)), p)   # drawn, not holes
     p = np.where((hot > 0.5) & body & ~feat, np.maximum(p, P.hot_fill * lift), p)
+    if P.core_halo > 0 and (hot > 0.5).any():   # the light thins out round the core, not a cliff
+        dt = cv2.distanceTransform((hot <= 0.5).astype(np.uint8), cv2.DIST_L2, 3)
+        p = np.where(body & (hot <= 0.5), np.maximum(p, P.core_halo * lift * np.exp(-dt / 8)), p)
     if P.hot_fill * lift > 0.85:   # no holes in a solid core, but its features show through
         hot_solid = (hot > 0.6) & body & ~feat
     else:
@@ -552,7 +556,9 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         tt = cv2.GaussianBlur(tt, (0, 0), P.smooth)
     if P.features > 0:   # eyes, nostrils, mouth: small dark spots go darker, so they read as holes
         k = max(3, int(round(0.03 * max(H, W))) | 1)
-        th = cv2.morphologyEx(tt, cv2.MORPH_BLACKHAT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        th = cv2.morphologyEx(cv2.GaussianBlur(tt, (0, 0), 1.5), cv2.MORPH_BLACKHAT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        if (a > 0.5).any():   # only the real features, not the fine texture all over
+            th = np.where(th > np.percentile(th[a > 0.5], 85), th, 0)
         tt = np.clip(tt - P.features * th, 0, 1).astype(np.float32)
     if P.rim > 0 and 0.02 < (a > 0.5).mean() < 0.97:   # the silhouette diffuses solid, not frayed
         m = (a > 0.5).astype(np.uint8)
