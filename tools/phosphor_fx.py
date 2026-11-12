@@ -206,6 +206,7 @@ class Glow:
     sharpen: float = 1.0        # unsharp amount: the halo along edges
     radius: float = 1.6         # and its radius (dots)
     order: float = 0.3          # ordered (Bayer) against random dither: 1 all ordered
+    lattice: float = 0.3        # how far the dither follows a pitch-2 lattice filled row-wise
     cross: float = 0.7          # how much the random dither's noise is shared with the dots beside, above and below
     hue: float = 0.02           # how much neighbouring dots' colours scatter
     zones: float = 10.0         # how broad the light is that sets the colour (dots)
@@ -312,6 +313,9 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         nz = (1 - P.cross) * nz + P.cross * cv2.filter2D(nz, -1, kx, borderType=cv2.BORDER_REFLECT)
         nz = (np.argsort(np.argsort(nz, axis=None)).reshape(H, W) / nz.size).astype(np.float32)
     thr = P.order * bayer(H, W) + (1 - P.order) * nz
+    if P.lattice > 0:   # a pitch-2 lattice of separate dots first, then their level neighbours: dots in rows, not a checker
+        l2 = np.tile(np.float32([[0.0, 0.25], [0.5, 0.75]]), (H // 2 + 1, W // 2 + 1))[:H, :W] + 0.125
+        thr = (1 - P.lattice) * thr + P.lattice * l2
 
     # colour per dot: by the broad light, in zones along one ramp (blue, blue 2, green, orange,
     # white), each zone one colour or an ordered checker of its two neighbours on the ramp, never
