@@ -218,7 +218,7 @@ class Glow:
     rim_lines: int = 3          # parallel lines along a rim, a dot wide, a dot of black between
     rim_level: float = 0.985    # which edges get one (percentile of edge strength; the outline always)
     line_level: float = 0.99    # which edges count as contours (percentile of edge strength)
-    ramp: tuple = (0.0, 0.3, 0.7, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
+    ramp: tuple = (0.0, 0.3, 0.74, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
     floor: float = 0.05         # the least light in the figure: its shade never quite goes black
     fringe: float = 0.8         # magenta on the dark side of bright edges
     warmth: float = 0.15        # how far the picture's own warm light leans to orange
