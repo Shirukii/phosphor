@@ -46,7 +46,7 @@ class Glow2:
     plane_heat: float = 0.80   # the heat the brightest plane reaches
     plane_gamma: float = 1.6   # how fast the planes thin out below it
     line_min: int = 14         # the shortest line kept (dots): no worms on rough texture
-    source: float = 0.0        # how much heat the picture's light source adds (0: none; off: 0.6 tied the blind pick 6 to 6)
+    source: float = 0.4        # how much the picture's light source lifts the light round it (0: none)
     source_size: float = 0.04  # how far that heat reaches round it, as a share of the frame
     source_spill: float = 0.04 # how much of it lights the black round the source
     source_xy: tuple | None = None   # the source set by hand (x, y, 0..1 of the frame)
