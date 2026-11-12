@@ -326,7 +326,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         gr = rng.random((H, W))
         col[(hot > 0.6) & (col == WHITE) & ~lat & ~((hot > 0.85) & (gr < 0.1))] = ORANGE   # white mostly on the lattice
         col[core_o & (hot > 0.85) & (col == GREEN)] = ORANGE   # green a ring round the core, never under its white
-        col[core_o & lat & (col == ORANGE) & (rng.random((H, W)) < P.grain * 4.5 * hot)] = WHITE   # on orange only
+        col[core_o & lat & (col == ORANGE) & (rng.random((H, W)) < np.minimum(P.grain * 4.5 * hot, 0.6))] = WHITE   # on orange only, even through the core
+        gb = rng.random((H, W))
+        col[(hot > 0.6) & (col == ORANGE) & (gb < 0.03)] = BLUE2      # the grid broken by a few stray dots
+        col[(hot > 0.6) & (col == ORANGE) & (gb > 0.98)] = MAGENTA
         col[(hot > 0.6) & (col == MAGENTA) & (dark_side == 0)] = ORANGE
 
     # contours: thin continuous lines, each line one colour
@@ -470,7 +473,7 @@ class Streak:
     colour: str = '#ee1111'
     gain: float = 1.0           # more or less light
     gamma: float = 2.1          # tone curve: above 1, darker mid-tones and more contrast
-    most: float = 0.92          # the densest the dots get: near solid in the highlights
+    most: float = 0.86          # the densest the dots get: near solid in the highlights, a pinhole in seven
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
