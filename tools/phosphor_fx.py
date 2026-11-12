@@ -777,6 +777,7 @@ class Dust:
     edges: float = 0.35         # specks gathering on the outline (and less, the edges inside)
     flecks: int = 5000          # short flecks, placed afresh each frame (counts are for 540x540)
     fleck_len: tuple[int, int] = (2, 3)
+    fleck_turn: float = 0.5     # share of flecks pointing any way, not along the shapes
     angle: float = 0            # the way the dust drifts off (degrees: 0 right, 90 down)
     dissolve: float = 0.97      # how much of the far side's body is gone (to motes)
     spare_lit: bool = True      # drift the other way if the far side holds the most light
@@ -787,7 +788,7 @@ class Dust:
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
-    specks_glint: int = 40      # small glints out in the drift, each twinkling for part of the loop
+    specks_glint: int = 15      # small glints out in the drift, each twinkling for part of the loop
     haze: float = 0.12          # faint dark-grey dots round the lit ones (0: none)
     flat: bool = False          # one flat grey for everything (no shades, no haze), as some dust art is
     checker: float = 0.25       # flat only: share of the mid-tone body drawn as patches of checkerboard dither
@@ -989,7 +990,11 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         fs = seed_where(wf.astype(np.float32), int(P.flecks * many), rng)
         if len(fs):
             fx, fy = fs[:, 0].astype(int), fs[:, 1].astype(int)
-            fv = fdir[fy, fx]
+            fv = fdir[fy, fx].copy()
+            if P.fleck_turn > 0:   # some point any way: ticks, not a combed hatch
+                tw = rng.random(len(fs)) < P.fleck_turn
+                an = rng.uniform(0, np.pi, tw.sum())
+                fv[tw] = np.stack([np.cos(an), np.sin(an)], 1)
             ln = rng.integers(P.fleck_len[0], P.fleck_len[1] + 1, len(fs))
             fl = rng.integers(2, NL, len(fs)).astype(np.uint8)   # never white: that's for the brightest
             wig = rng.normal(0, 0.15, (len(fs), 2)).astype(np.float32)
@@ -1139,6 +1144,7 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
         P.flat = True
         P.grain_wide = 2.0   # flat dust art's grains run level
         P.clump_size, P.order, P.comb = 0.5, 0.3, 0.6   # finer grain, flecks combed with the drift
+        P.fleck_turn, P.specks_glint = 0.0, 40
     if frames:
         P.frames = frames
     if colour and isinstance(P, (Streak, Dust)):
