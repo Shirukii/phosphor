@@ -669,12 +669,12 @@ const FX_COLOURS: [string, string][] = [['red', '#ee1111'], ['white', '#f2f2f2']
 // each style's choices (value, label), and what it starts at: glow is a slow 3 s loop at 24 fps on a
 // fine grid, streak a fast 1 s boil on a coarse one, dust a 2 s drift on a fine one
 // hand controls: sliders run -100..100 around the style's own settings (0), a factor of 2^(v/63) (about ⅓× to 3×)
-type FxSet = { long: number, frames: number, scale: number, angle: number | null, colour: string, flat?: boolean,
+type FxSet = { long: number, frames: number, scale: number, angle: number | null, colour: string, flat?: boolean, streaks?: boolean,
   exposure: number, highlights: number, warmth: number, focus: [number, number] | null };
 const TUNE0 = { exposure: 0, highlights: 0, warmth: 0, focus: null };
 const FX: Record<Style, { long: number[], len: [number, string][], scale: number[], fps: number, d: FxSet }> = {
   glow: { long: [360, 540, 720], len: [[48, '2 s'], [72, '3 s'], [96, '4 s']], scale: [1, 2], fps: 24,
-    d: { long: 540, frames: 72, scale: 2, angle: 0, colour: '', ...TUNE0 } },
+    d: { long: 540, frames: 72, scale: 2, angle: 0, colour: '', streaks: true, ...TUNE0 } },
   streak: { long: [180, 270, 360], len: [[12, '½ s'], [24, '1 s'], [48, '2 s']], scale: [2, 4], fps: 24,
     d: { long: 270, frames: 24, scale: 4, angle: 0, colour: 'red', ...TUNE0 } },
   dust: { long: [360, 540, 720], len: [[24, '1 s'], [48, '2 s'], [72, '3 s']], scale: [1, 2], fps: 24,
@@ -699,6 +699,7 @@ function fxButtons(): void {
   placeFocus();
   setSeg('fx-colours', c.colour);
   setSeg('fx-tone', c.flat ? '1' : '0');
+  setSeg('fx-streaks', c.streaks === false ? '0' : '1');
 }
 
 $('fx-colours').innerHTML = FX_COLOURS.map(([v, c]) =>
@@ -767,6 +768,7 @@ function dialSet(deg: number): void { fxSet().angle = deg; dial(deg); renderFx(0
   });
 }
 seg('fx-tone', v => { fxSet().flat = v === '1'; renderFx(0); });
+seg('fx-streaks', v => { fxSet().streaks = v === '1'; renderFx(0); });
 seg('mode', v => setMode(v as Mode));
 
 function setMode(m: Mode): void {
@@ -779,6 +781,7 @@ function setMode(m: Mode): void {
   $('fx-colours').hidden = m === 'live' || m === 'glow';
   $('fx-angle').hidden = m !== 'dust';   // only dust has a direction
   $('fx-tone').hidden = m !== 'dust';
+  $('fx-streaks').hidden = m !== 'glow';
   $('tu-warmth-l').hidden = m !== 'glow';
   $('tu-focus').hidden = m !== 'glow';
   if (m !== 'glow') setPickFocus(false); else pressed($('tu-focus'), fxSet().focus !== null);
@@ -799,7 +802,8 @@ function setMode(m: Mode): void {
 function fxBody(format: string, scale: number, save: boolean): object {
   const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
   return { ...params(), style: fxs.mode, long: fxSet().long, frames: fxSet().frames, angle: fxs.mode === 'dust' ? fxSet().angle ?? undefined : undefined,
-    colour: fxSet().colour || undefined, flat: fxs.mode === 'dust' ? fxSet().flat : undefined, tune: tuneBody(), format, scale, name,
+    colour: fxSet().colour || undefined, flat: fxs.mode === 'dust' ? fxSet().flat : undefined,
+    streaks: fxs.mode === 'glow' ? fxSet().streaks !== false : undefined, tune: tuneBody(), format, scale, name,
     save: save && !server.public && $<HTMLInputElement>('save').checked };
 }
 function tuneBody(): object {

@@ -2,13 +2,14 @@
 """Render a picture as a looping clip of dots on black, in one of three styles.
 
     phosphor_fx.py PICTURE [--style glow|streak|dust|all] [--long N] [--scale N] [--frames N] [--fps N]
-                   [--cutout] [--colour C] [--angle DEG] [--flat] [--seed N] [--out DIR] [--formats gif,webp,png]
+                   [--cutout] [--colour C] [--angle DEG] [--flat] [--no-streaks] [--seed N] [--out DIR] [--formats gif,webp,png]
 
-  glow    six colours on black: the picture's light, levelled, as one smooth ramp of colour
-          (black, blue, teal, salmon, pale) pattern-dithered onto the palette, so the shade is a
-          sparse lattice of blue dots and full tones are checkers of two or three colours. Light
-          runs hotter where much of it gathers, and round the picture's one light source. The
-          picture holds still; the sparse dots of the shade blink.
+  glow    six colours on black: the picture's light, levelled, as dots whose number and mix of
+          colours follow the light: the shade a sparse field of blue with a few dots of every
+          colour among it, a band rich in green round the light, the light itself orange and
+          magenta. Light runs hotter where much of it gathers, and round the picture's one light
+          source. The picture holds still; the sparse dots of the shade blink, and dotted lines
+          fall from its lower edges (--no-streaks: none).
   streak  one colour (--colour, default red) on a coarse grid: the figure error-diffused afresh
           every frame so it boils, short dashes along its shapes (and over the texture of its
           shaded parts, which the dither leaves black), loose specks gathering towards the bottom,
@@ -378,7 +379,7 @@ def drip(frames: np.ndarray, P: Glow, seed: int) -> np.ndarray:
         if rng.random() < P.drip_bundle and x + 2 < w:
             cols.append((y + int(rng.integers(-1, 2)), x + 2, still[y, x]))
     out = frames.copy()
-    black = ~lit
+    black = ~(frames > 0).any(0)   # never over a dot of the picture, lit or blinking
     for y, x, colour in cols:
         # one life per loop: it falls, hangs, thins out, and is gone when the loop comes round
         fade = 0.25 * T
@@ -1213,9 +1214,11 @@ def tune(P, t: dict | None):
 
 
 def params(style: str, frames: int | None = None, colour: str | None = None, angle: float | None = None,
-           flat: bool = False):
+           flat: bool = False, streaks: bool = True):
     """A style's settings, with the given ones changed."""
     P = STYLES[style][1]()
+    if not streaks and isinstance(P, Glow):
+        P.drips = 0
     if flat and isinstance(P, Dust):
         P.flat = True
         P.grain_wide = 2.0   # flat dust art's grains run level
@@ -1233,12 +1236,13 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
 
 
 def render(rgba: np.ndarray, style: str, frames: int | None = None, colour: str | None = None,
-           angle: float | None = None, seed: int | None = None, flat: bool = False, hand: dict | None = None) -> Frames:
+           angle: float | None = None, seed: int | None = None, flat: bool = False, hand: dict | None = None,
+           streaks: bool = True) -> Frames:
     """A framed picture (RGBA at the output size) as a clip in a style. Without a seed, one from
     the picture: the same picture comes out the same, and no two pictures share their rain."""
     if seed is None:
         seed = zlib.crc32(np.ascontiguousarray(rgba[::7, ::7]).tobytes())
-    return STYLES[style][0](analyse(rgba), tune(params(style, frames, colour, angle, flat), hand), seed)
+    return STYLES[style][0](analyse(rgba), tune(params(style, frames, colour, angle, flat, streaks), hand), seed)
 
 
 def main() -> None:
@@ -1254,6 +1258,7 @@ def main() -> None:
     ap.add_argument('--colour', help='streak, dust: the colour (hex, or ' + ', '.join(COLOURS) + ')')
     ap.add_argument('--angle', type=float, help='dust: which way the dust goes (degrees, 0 right, 90 down)')
     ap.add_argument('--flat', action='store_true', help='dust: one flat grey, no shades or haze')
+    ap.add_argument('--no-streaks', action='store_true', help='glow: no dotted lines falling from the lower edges')
     ap.add_argument('--seed', type=int, help='default: one from the picture')
     ap.add_argument('--out', type=Path, help='default out/<picture>/fx')
     ap.add_argument('--formats', default='gif,webp,png')
@@ -1262,7 +1267,7 @@ def main() -> None:
     out = a.out or Path('out') / a.picture.stem / 'fx'
     img = Image.open(a.picture)
     for name in (STYLES if a.style == 'all' else [a.style]):
-        P = params(name, a.frames, a.colour, a.angle, a.flat)
+        P = params(name, a.frames, a.colour, a.angle, a.flat, not a.no_streaks)
         long = a.long or P.long
         k = long / max(aw, ah)
         rgba = prepare(img, (max(8, round(aw * k)), max(8, round(ah * k))), a.cutout)

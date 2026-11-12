@@ -73,12 +73,13 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
 
 `tools/phosphor_fx.py` draws a picture as a loop of dots on black, in one of three styles:
 
-- **glow:** six colours on black. The picture's light is levelled, turned into one smooth ramp of
-  colour (black, blue, teal, salmon, pale) and pattern-dithered onto the palette: the shade is a
-  sparse lattice of blue dots, full tones are checkers of two or three colours. Light runs hotter
-  where much of it gathers and round the picture's one light source. The picture holds still while
-  the sparse dots of the shade blink. A drawing on white paper is inverted: its lines are the
-  light. 3 s at 24 fps.
+- **glow:** six colours on black. The picture's light is levelled and drawn as dots whose number
+  and mix of colours follow the light: the shade is a sparse field of blue with a few dots of every
+  colour among it, there is a band rich in green round the light, and the light itself is orange
+  and magenta. Light runs hotter where much of it gathers and round the picture's one light
+  source. The picture holds still while the sparse dots of the shade blink and dotted lines fall
+  from its lower edges (`--no-streaks`, or the Streaks switch in the web page, for none). A drawing
+  on white paper is inverted: its lines are the light. 3 s at 24 fps.
 - **streak:** one colour (red by default) on a coarse grid, error-diffused afresh each frame so the
   figure boils, short dashes along its shapes (and drawing the texture of its shaded parts, where
   the dither leaves black), clean black round it but for loose specks gathering towards the bottom, and slanted rain

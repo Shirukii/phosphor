@@ -213,7 +213,7 @@ def hand_controls(t) -> dict:
 
 def styled(q: dict) -> tuple[fx.Frames, str]:
     """A styled clip for a request: picture, cut-out, view, the map's size (for the aspect), style,
-    long (the clip's longest side, in dots), frames, colour (streak, dust), angle (dust), flat (dust), tune (hand controls). The last one is kept with the picture,
+    long (the clip's longest side, in dots), frames, colour (streak, dust), angle (dust), flat (dust), streaks (glow), tune (hand controls). The last one is kept with the picture,
     so a download right after its preview isn't drawn again."""
     p = picture(q)
     style = str(q.get('style'))
@@ -248,14 +248,15 @@ def styled(q: dict) -> tuple[fx.Frames, str]:
     if view[2] <= 1:
         raise Bad('view: too small')
     flat = style == 'dust' and bool(q.get('flat'))
+    streaks = style != 'glow' or q.get('streaks') is None or bool(q.get('streaks'))   # glow's falling lines: on unless turned off
     hand = hand_controls(q.get('tune'))
-    key = (style, W, H, view, frames, colour, angle, flat, tuple(sorted((k, str(v)) for k, v in hand.items())), id(p['alpha']))
+    key = (style, W, H, view, frames, colour, angle, flat, streaks, tuple(sorted((k, str(v)) for k, v in hand.items())), id(p['alpha']))
     if p.get('fx', (None,))[0] == key:
         return p['fx'][1], style
     rgba = pp.frame(rgb, alpha, view, (W, H))
     if rgba[..., 3].max() < 128:
         raise Bad('Nothing of the figure is in view: move the frame onto it, or redo the cut-out.')
-    fr = fx.render(rgba, style, frames, colour or None, angle, flat=flat, hand=hand)
+    fr = fx.render(rgba, style, frames, colour or None, angle, flat=flat, hand=hand, streaks=streaks)
     p['fx'] = (key, fr)
     return fr, style
 
