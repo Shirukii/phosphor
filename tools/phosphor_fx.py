@@ -219,6 +219,7 @@ class Glow:
     outline: float = 0.45       # how much of the unlit outline is drawn, sparse and cool
     rim_lines: int = 3          # parallel lines along a rim, a dot wide, a dot of black between
     rim_breaks: float = 0.3     # share of the rim's length left out, in stretches
+    rim_fill: float = 0.8       # how much of the black between the inner rim lines is filled
     rim_level: float = 0.985    # which edges get one (percentile of edge strength; the outline always)
     line_level: float = 0.99    # which edges count as contours (percentile of edge strength)
     ramp: tuple = (0.0, 0.3, 0.74, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
@@ -419,6 +420,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         on = line & (rng.random((H, W)) < P.rim * dens * (wide if k else 1.6 * wide))
         p = np.where(on, 1.0, np.where(line, 0.0, np.where(gap, 0.3 * p, p)))
         col[on] = c[on] if isinstance(c, np.ndarray) else c
+        if P.rim_fill > 0 and k < 2:   # the inner gaps partly filled: the lines merge into a band, as the references' rims do
+            fill = gap & (rng.random((H, W)) < P.rim_fill * dens * wide)
+            p = np.where(fill, 1.0, p)
+            col[fill] = c[fill] if isinstance(c, np.ndarray) else c
     if P.outline > 0 and not (a > 0.5).all():   # the unlit rest of the outline: a sparse, cool line
         dark_out = ((m8 - cv2.erode(m8, np.ones((3, 3), np.uint8))) > 0) & ~lit_out & ~near
         dark_out[[0, -1], :] = dark_out[:, [0, -1]] = False
