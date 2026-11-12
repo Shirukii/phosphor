@@ -209,6 +209,8 @@ class Glow:
     hue: float = 0.1            # how much neighbouring dots' colours scatter
     zones: float = 10.0         # how broad the light is that sets the colour (dots)
     mix: float = 0.7            # how far neighbouring zones checker into each other, dot by dot
+    scatter: float = 1.4        # random spread of the colour steps round the light's top end
+    edge_mix: float = 0.6       # how far the hot core's edge mixes its colour with the light round it
     edge_hue: float = 0.05      # how far fine edges push the colour up the ramp
     lines: float = 0.15         # how much of the contours is drawn as a line
     rim: float = 0.7            # how dense the rim lines are
@@ -331,7 +333,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
     r = np.interp(v, np.maximum.accumulate(anchors + np.arange(5) * 1e-6), np.arange(5))
     ramp = np.array([BLUE, BLUE2, GREEN, ORANGE, WHITE], np.uint8)
-    col = ramp[np.clip(np.floor(r + P.mix * (bayer(H, W) - 0.5)), 0, 4).astype(int)]   # zones, checkered where they meet
+    # round the light's top end the steps scatter into each other over a wide band, as in the
+    # references (orange into green into blue), not a clean contour; the hot core's middle stays calm
+    sw = np.clip(1 - np.abs(r - 2.6) / 1.2, 0, 1) * np.clip((0.9 - hot) / 0.3, 0, 1)
+    col = ramp[np.clip(np.floor(r + P.mix * (bayer(H, W) - 0.5) + P.scatter * sw * (rng.random((H, W)) - 0.5)), 0, 4).astype(int)]   # zones, checkered where they meet
     col[(col == BLUE2) & (r < 1.2 + P.mix) & (rng.random((H, W)) < 0.5)] = BLUE   # the two blues mingle
     col[(rng.random((H, W)) < P.fringe * dark_side)] = MAGENTA          # purple just off bright edges
     if P.grain > 0:   # the hot core's orange grained with white on a fine lattice, not clean bands
@@ -344,6 +349,13 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         col[core_o & lat & (col == ORANGE) & (rng.random((H, W)) < np.minimum(P.grain * 4.5 * hot, 0.6))] = WHITE   # on orange only, even through the core
         din = cv2.distanceTransform((hot > 0.5).astype(np.uint8), cv2.DIST_L2, 3)   # the core's edge, wide: orange fades through green
         col[(col == ORANGE) & (rng.random((H, W)) < 0.85 * np.clip(1 - din / P.core_fade, 0, 1))] = GREEN
+        # and its edge a wide mixed band, not a contour: blue dots well into the core's rim,
+        # orange dots out into the green round it
+        dout = cv2.distanceTransform((hot <= 0.5).astype(np.uint8), cv2.DIST_L2, 3)
+        em = rng.random((H, W))
+        col[(col >= GREEN) & (col <= ORANGE) & (hot > 0.5) & (em < P.edge_mix * 0.5 * np.clip(1 - din / (1.5 * P.core_fade), 0, 1))] = BLUE2
+        col[(col == GREEN) & (hot <= 0.5) & (em < P.edge_mix * 0.6 * np.exp(-dout / 5))] = ORANGE
+        col[(col == GREEN) & (hot <= 0.5) & (em > 1 - P.edge_mix * 0.4 * np.exp(-dout / 6))] = BLUE
         gb = rng.random((H, W))
         col[(hot > 0.6) & (col == ORANGE) & (gb < 0.03)] = BLUE2      # the grid broken by a few stray dots
         col[(hot > 0.6) & (col == ORANGE) & (gb > 0.98)] = MAGENTA
