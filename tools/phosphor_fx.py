@@ -701,11 +701,12 @@ class Dust:
     black: float = 0.12         # light below this is black
     most: float = 0.55          # the densest the specks get, in the brightest light
     clump: float = 1.0          # how much the specks clump (0: even white noise): grains, not a sieve
+    clump_size: float = 0.5     # the blur that clumps them (dots): finer keeps small features
     outline: float = 0.6        # how much of the silhouette and strongest edges is drawn as bright strokes
     dust_floor: float = 0.1     # the least density in the intact figure (a cut-out only): its shade doesn't go black
     pair: float = 0.6           # share of lone body specks given a neighbour along the shapes
     shade_lev: float = 0.6      # how far each speck's grey follows the light (0: any grey)
-    order: float = 0.0          # how much of the body is an ordered (Bayer) dither, not noise (any order leaves lone dots)
+    order: float = 0.3          # how much of the body is an ordered (Bayer) dither, not noise: a little keeps features crisp
     edges: float = 0.35         # specks gathering on the outline (and less, the edges inside)
     flecks: int = 5000          # short flecks, placed afresh each frame (counts are for 540x540)
     fleck_len: tuple[int, int] = (2, 3)
@@ -791,7 +792,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     def flat_noise():
         n = rng.random((H, W)).astype(np.float32)
         if P.clump > 0:
-            n = (1 - P.clump) * n + P.clump * cv2.GaussianBlur(n, (0, 0), 0.8)
+            n = (1 - P.clump) * n + P.clump * cv2.GaussianBlur(n, (0, 0), P.clump_size)
             n = (np.argsort(np.argsort(n, axis=None)).reshape(H, W) / n.size).astype(np.float32)
         return n
 
