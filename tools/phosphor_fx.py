@@ -294,12 +294,15 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     if body.any():   # the core near solid, if the light has one: evenly lit line art has none
         q50, q95 = np.quantile(zone[body], [0.5, 0.95])
         lift = float(np.clip(((q95 - q50) / (q50 + 0.05) - 0.3) / 0.25, 0, 1))
-        p = np.where((hot > 0.5) & body, np.maximum(p, P.hot_fill * lift), p)
-    if P.hot_fill * lift > 0.85:   # no holes in a solid core
-        hot_solid = (hot > 0.6) & body
+        g1 = cv2.GaussianBlur(t, (0, 0), 1.0)
+    gmag = np.hypot(cv2.Sobel(g1, cv2.CV_32F, 1, 0), cv2.Sobel(g1, cv2.CV_32F, 0, 1))
+    feat = gmag > (np.percentile(gmag[body], 90) if body.any() else 1)   # eyes, mouth, folds inside the core
+    p = np.where((hot > 0.5) & body & ~feat, np.maximum(p, P.hot_fill * lift), p)
+    if P.hot_fill * lift > 0.85:   # no holes in a solid core, but its features show through
+        hot_solid = (hot > 0.6) & body & ~feat
     else:
         hot_solid = np.zeros_like(body)
-    v = zone + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
+    v = zone - 0.25 * (feat & (hot > 0.5)) + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
     lit0 = thr < p
     anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
     r = np.interp(v, np.maximum.accumulate(anchors + np.arange(5) * 1e-6), np.arange(5))
