@@ -9,6 +9,8 @@ continuous picture onto the palette, not dots placed by rule. So:
   light  -> the picture's light at the dot grid (white-paper line art is inverted)
   drawn  -> a tonal picture (a photo, a painting) is first drawn: its contours as lines one dot
             wide, and of its surfaces only the lit planes; inside, the shade is black
+  expose -> each picture's light brought to one level: its brightest light to full, its
+            middle light lifted if it sits too low (a dim picture is not left dim)
   heat   -> light, plus a soft bloom of it (dense or bright places run hotter)
   source -> one light source is found (the most compact strong light, by brightness or by
             colour strength, off the frame's edge) and runs hot, the heat falling off round it
@@ -32,6 +34,9 @@ BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
 
 @dataclass
 class Glow2:
+    expose: float = 0.0        # how far each picture's light is brought to one level (0: as it is; off until picked)
+    expose_high: float = 0.9   # where the brightest light (the top half percent of the subject) is put
+    expose_mid: float = 0.36   # the least the middle light (its median) is lifted to
     black: float = 0.3        # light below this is black
     white: float = 1.25        # light at this or more is full
     gamma: float = 1.0         # tone curve between them
@@ -131,6 +136,20 @@ def source(rgba: np.ndarray, v: np.ndarray, P: Glow2) -> np.ndarray:
     return np.exp(-(d / (P.source_size * long)) ** 2).astype(np.float32)
 
 
+def exposed(v: np.ndarray, P: Glow2) -> np.ndarray:
+    """The light at one level: a gain for the brightest light, a curve lifting a low middle."""
+    subject = v > 0.06
+    if not P.expose or subject.sum() < 50:
+        return v
+    mid, high = np.percentile(v[subject], [50, 99.5])
+    gain = float(np.clip(P.expose_high / max(high, 1e-3), 1.0, 1.8))
+    gain = 1 + (gain - 1) * float(np.clip((0.5 - mid) / 0.2, 0, 1))   # a picture bright in the middle needs none
+    m = min(mid * gain, 0.99)
+    gamma = float(np.clip(np.log(P.expose_mid) / np.log(m), 0.65, 1.0)) if m < P.expose_mid else 1.0
+    out = np.clip(v * gain, 0, 1) ** gamma
+    return (v + P.expose * (out - v)).astype(np.float32)
+
+
 def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> np.ndarray:
     """Pattern dither: per dot, n palette picks whose mix nears the target; the Bayer cell picks one."""
     h, w, _ = target.shape
@@ -151,7 +170,8 @@ def knoll(target: np.ndarray, pal: np.ndarray, spread: float, n: int = 16) -> np
 def glow2(rgba: np.ndarray, P: Glow2 | None = None, invert: bool | None = None) -> tuple[np.ndarray, np.ndarray]:
     """One frame: (palette index per dot, palette)."""
     P = P or Glow2()
-    v = v0 = light(rgba, invert)
+    v0 = light(rgba, invert)
+    v = exposed(v0, P)
     draw = P.draw if P.draw is not None else float(not line_art(rgba, v))
     if draw:
         v = drawn(v, P)
