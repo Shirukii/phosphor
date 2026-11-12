@@ -387,8 +387,9 @@
       <div class="live-bar at-top off" id="mode-bar">
         <div class="group" id="mode" role="group" aria-label="Style">
           <button data-v="live" aria-pressed="true" title="Phosphor's own look: breathing and blinking, live">Live</button>
-          <button data-v="glow" title="Many colours, glowing edges, drifting dust: a looping clip">Glow</button>
-          <button data-v="streak" title="One colour, flowing dashes and rain: a looping clip">Streak</button>
+          <button data-v="glow" title="Blues to white on black, warm rims, light streaming through it: a looping clip">Glow</button>
+          <button data-v="streak" title="One colour on a coarse grid, boiling, with rain: a looping clip">Streak</button>
+          <button data-v="dust" title="Sparse grey specks and dashes along the form: a looping clip">Dust</button>
         </div>
       </div>
       <div class="pick-note" id="pick-note">Click the top of the neck</div>
@@ -407,9 +408,10 @@
       </div>
       <div class="live-bar off" id="fx-bar">
         <div class="group swatches" id="fx-colours"></div>
-        <div class="group" id="fx-long" title="Dots across the longer side"><button data-v="360">360</button><button data-v="540" aria-pressed="true">540</button><button data-v="720">720</button></div>
-        <div class="group" id="fx-len" title="How long one loop runs"><button data-v="32">2 s</button><button data-v="48" aria-pressed="true">3 s</button><button data-v="64">4 s</button></div>
-        <div class="group" id="fx-scale" title="Each dot as 1×1 or 2×2 px in the files"><button data-v="1">1×</button><button data-v="2" aria-pressed="true">2×</button></div>
+        <div class="group" id="fx-angle" title="Which way the light streams"></div>
+        <div class="group" id="fx-long" title="Dots across the longer side"></div>
+        <div class="group" id="fx-len" title="How long one loop runs"></div>
+        <div class="group" id="fx-scale" title="Each dot as N×N px in the files"></div>
         <div class="group">
           <button id="fx-gif" title="Download a looping GIF">
             <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M7 1.8v7.7M3.8 6.3 7 9.5l3.2-3.2M1.8 12.2h10.4"/></svg>GIF</button>

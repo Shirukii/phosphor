@@ -663,17 +663,45 @@ $('export').addEventListener('click', async () => {
 
 // ---- styled clips: glow and streak, rendered on the server as a looping WebP (preview) or GIF
 
-type Mode = 'live' | 'glow' | 'streak';
-const FX_COLOURS: [string, string][] = [['red', '#ff2020'], ['white', '#f2f2f2'], ['green', '#4fe08a'], ['blue', '#6f93e8'], ['amber', '#ffb347'], ['rose', '#f07aa6']];
-const fxs = { mode: 'live' as Mode, colour: 'red', long: 540, frames: 48, scale: 2, url: '', seq: 0, w: 0, h: 0 };
+type Mode = 'live' | 'glow' | 'streak' | 'dust';
+type Style = Exclude<Mode, 'live'>;
+const FX_COLOURS: [string, string][] = [['red', '#ee1111'], ['white', '#f2f2f2'], ['grey', '#b8b8b8'], ['green', '#4fe08a'], ['blue', '#6f93e8'], ['amber', '#ffb347'], ['rose', '#f07aa6']];
+// each style's choices (value, label), and what it starts at: glow is a slow 3 s loop at 24 fps on a
+// fine grid, streak a fast 1 s boil on a coarse one
+type FxSet = { long: number, frames: number, scale: number, angle: number, colour: string };
+const FX: Record<Style, { long: number[], len: [number, string][], scale: number[], fps: number, d: FxSet }> = {
+  glow: { long: [360, 540, 720], len: [[48, '2 s'], [72, '3 s'], [96, '4 s']], scale: [1, 2], fps: 24,
+    d: { long: 540, frames: 72, scale: 2, angle: 0, colour: '' } },
+  streak: { long: [180, 270, 360], len: [[12, '½ s'], [24, '1 s'], [48, '2 s']], scale: [2, 4], fps: 24,
+    d: { long: 270, frames: 24, scale: 4, angle: 0, colour: 'red' } },
+  dust: { long: [270, 360, 540], len: [[12, '½ s'], [24, '1 s'], [48, '2 s']], scale: [2, 3], fps: 24,
+    d: { long: 360, frames: 24, scale: 3, angle: 0, colour: 'grey' } },
+};
+const FX_ANGLES: [number, string, string][] = [[0, '↔', 'Across'], [90, '↕', 'Up and down'], [45, '⤡', 'Diagonal, falling'], [315, '⤢', 'Diagonal, rising']];
+const fxSets: Record<Style, FxSet> = { glow: { ...FX.glow.d }, streak: { ...FX.streak.d }, dust: { ...FX.dust.d } };
+const fxs = { mode: 'live' as Mode, url: '', seq: 0, w: 0, h: 0 };
+const fxSet = (): FxSet => fxSets[fxs.mode === 'live' ? 'glow' : fxs.mode];
 let fxTimer = 0;
 
+function fxButtons(): void {
+  if (fxs.mode === 'live') return;
+  const o = FX[fxs.mode], c = fxSet();
+  const b = (v: number, label: string, on: boolean, title = '') =>
+    `<button data-v="${v}" aria-pressed="${on}"${title ? ` title="${title}"` : ''}>${label}</button>`;
+  $('fx-long').innerHTML = o.long.map(v => b(v, String(v), v === c.long)).join('');
+  $('fx-len').innerHTML = o.len.map(([v, l]) => b(v, l, v === c.frames)).join('');
+  $('fx-scale').innerHTML = o.scale.map(v => b(v, v + '×', v === c.scale)).join('');
+  $('fx-angle').innerHTML = FX_ANGLES.map(([v, l, t]) => b(v, l, v === c.angle, t)).join('');
+  setSeg('fx-colours', c.colour);
+}
+
 $('fx-colours').innerHTML = FX_COLOURS.map(([v, c]) =>
-  `<button data-v="${v}" aria-pressed="${v === fxs.colour}" title="${v}"><span class="sw" style="background:${c}"></span></button>`).join('');
-seg('fx-colours', v => { fxs.colour = v; renderFx(0); });
-seg('fx-long', v => { fxs.long = Number(v); renderFx(0); });
-seg('fx-len', v => { fxs.frames = Number(v); renderFx(0); });
-seg('fx-scale', v => { fxs.scale = Number(v); });
+  `<button data-v="${v}" aria-pressed="${v === 'red'}" title="${v}"><span class="sw" style="background:${c}"></span></button>`).join('');
+seg('fx-colours', v => { fxSet().colour = v; renderFx(0); });
+seg('fx-long', v => { fxSet().long = Number(v); renderFx(0); });
+seg('fx-len', v => { fxSet().frames = Number(v); renderFx(0); });
+seg('fx-scale', v => { fxSet().scale = Number(v); });
+seg('fx-angle', v => { fxSet().angle = Number(v); renderFx(0); });
 seg('mode', v => setMode(v as Mode));
 
 function setMode(m: Mode): void {
@@ -683,7 +711,9 @@ function setMode(m: Mode): void {
   if (ph) ph.canvas.hidden = !live;
   $('live-bar').classList.toggle('off', !live || !st.map);
   $('fx-bar').classList.toggle('off', live || !st.map);
-  $('fx-colours').hidden = m !== 'streak';
+  $('fx-colours').hidden = m === 'live' || m === 'glow';
+  $('fx-angle').hidden = m !== 'glow';
+  fxButtons();
   $('fx-img').hidden = live || !fxs.url;
   $('fx-wait').hidden = true;
   if (live) {
@@ -699,7 +729,8 @@ function setMode(m: Mode): void {
 
 function fxBody(format: string, scale: number, save: boolean): object {
   const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
-  return { ...params(), style: fxs.mode, long: fxs.long, frames: fxs.frames, colour: fxs.colour, format, scale, name,
+  return { ...params(), style: fxs.mode, long: fxSet().long, frames: fxSet().frames, angle: fxs.mode === 'glow' ? fxSet().angle : undefined,
+    colour: fxSet().colour || undefined, format, scale, name,
     save: save && !server.public && $<HTMLInputElement>('save').checked };
 }
 async function fxFetch(format: string, scale: number, save = false): Promise<Response> {
@@ -728,7 +759,7 @@ async function drawFx(): Promise<void> {
   fxs.url = url;
   fxs.w = img.naturalWidth; fxs.h = img.naturalHeight;
   img.hidden = fxs.mode === 'live';
-  $('live-meta').textContent = `${fxs.w} × ${fxs.h} · ${fxs.frames} frames · ${fxs.frames / 16} s loop`;
+  $('live-meta').textContent = `${fxs.w} × ${fxs.h} · ${fxSet().frames} frames · ${+(fxSet().frames / FX[mode as Style].fps).toFixed(2)} s loop`;
   status('Ready', 'ok');
   fitFx();
 }
@@ -743,7 +774,7 @@ function fitFx(): void {
 async function downloadFx(format: 'gif' | 'webp'): Promise<void> {
   if (!st.id || fxs.mode === 'live') return;
   await task(`Making the ${format.toUpperCase()}…`, async () => {
-    const r = await fxFetch(format, fxs.scale, true);
+    const r = await fxFetch(format, fxSet().scale, true);
     const blob = await r.blob(), a = document.createElement('a');
     const name = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '')?.[1] || `clip.${format}`;
     a.href = URL.createObjectURL(blob);

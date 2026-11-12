@@ -12,7 +12,7 @@ or out/ (nothing of the host's is read or written), smaller limits on uploads, m
 fewer pictures kept and for less long, and a few heavy jobs at a time.
 
 A small JSON API over phosphor_prep (cut-out, framing, blink), phosphor_map (the map, PNGs) and
-phosphor_fx (the glow and streak clips).
+phosphor_fx (the glow, streak and dust clips).
 Pictures are kept in memory, by a random id, until they go unused for a while (or the server
 restarts). Only the standard library besides those two's numpy, opencv and pillow. No secrets.
 """
@@ -70,7 +70,7 @@ class Limits:
 
 LOCAL = Limits()
 PUBLIC = Limits(public=True, max_size=1024, max_body=24 << 20, max_pixels=40_000_000, max_side=2048,
-                max_out=16_000_000, max_fx=720, max_fx_out=1440, max_fx_frames=72,
+                max_out=16_000_000, max_fx=720, max_fx_out=1440, max_fx_frames=96,
                 keep=16, ttl=3600, slots=2)  # ~50 MB a picture: under 1 GB held
 CFG = LOCAL
 PICTURES: dict[str, dict] = {}  # id -> rgb, alpha (or None), given (its own alpha), name, used
@@ -183,7 +183,7 @@ def make(q: dict) -> tuple[dict, dict | None]:
 
 def styled(q: dict) -> tuple[fx.Frames, str]:
     """A styled clip for a request: picture, cut-out, view, the map's size (for the aspect), style,
-    long (the clip's longest side, in dots), frames, colour. The last one is kept with the picture,
+    long (the clip's longest side, in dots), frames, colour (streak, dust), angle (glow). The last one is kept with the picture,
     so a download right after its preview isn't drawn again."""
     p = picture(q)
     style = str(q.get('style'))
@@ -191,10 +191,14 @@ def styled(q: dict) -> tuple[fx.Frames, str]:
         raise Bad('style: ' + ' or '.join(fx.STYLES))
     W0, H0 = size_of(q)
     try:
-        long = int(q.get('long') or 540)
-        frames = int(q.get('frames') or 48)
+        d = fx.params(style)
+        long = int(q.get('long') or d.long)
+        frames = int(q.get('frames') or d.frames)
+        angle = float(q['angle']) % 360 if q.get('angle') is not None else None
     except (TypeError, ValueError):
-        raise Bad('long, frames: whole numbers')
+        raise Bad('long, frames: whole numbers; angle: degrees')
+    if angle is not None and angle != angle:   # nan, or inf turned nan
+        raise Bad('angle: degrees')
     if not 64 <= long <= CFG.max_fx:
         raise Bad(f'long: 64 to {CFG.max_fx} dots')
     if not 8 <= frames <= CFG.max_fx_frames:
@@ -213,13 +217,13 @@ def styled(q: dict) -> tuple[fx.Frames, str]:
         view = pp.auto_view(alpha, (W0, H0))
     if view[2] <= 1:
         raise Bad('view: too small')
-    key = (style, W, H, view, frames, colour, id(p['alpha']))
+    key = (style, W, H, view, frames, colour, angle, id(p['alpha']))
     if p.get('fx', (None,))[0] == key:
         return p['fx'][1], style
     rgba = pp.frame(rgb, alpha, view, (W, H))
     if rgba[..., 3].max() < 128:
         raise Bad('Nothing of the figure is in view: move the frame onto it, or redo the cut-out.')
-    fr = fx.render(rgba, style, frames, colour or None)
+    fr = fx.render(rgba, style, frames, colour or None, angle)
     p['fx'] = (key, fr)
     return fr, style
 
@@ -317,7 +321,7 @@ def route(path: str, q: dict) -> tuple[str, bytes, dict]:
         H, W = fr[0].shape[1:]
         if max(W, H) * scale > CFG.max_fx_out:
             raise Bad(f'{scale}x makes {W * scale}x{H * scale} px: too big here. Pick a smaller scale or size.')
-        data = fx.encode(fr, fmt, 16, scale)
+        data = fx.encode(fr, fmt, fx.params(style).fps, scale)
         name = re.sub(r'[^A-Za-z0-9_.-]+', '-', str(q.get('name') or picture(q)['name'])).strip('.-')[:60] or 'picture'
         saved = ''
         if q.get('save') and not CFG.public:
