@@ -323,8 +323,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         core_o = (hot > 0.5) & (col >= GREEN) & (col != MAGENTA)
         gy, gx = np.mgrid[0:H, 0:W]
         lat = ((gx % 2) == 1) & ((gy % 2) == 1)
-        col[(hot > 0.6) & (col == WHITE) & ~lat] = ORANGE   # in the core, white only on the lattice: no runs
-        col[core_o & lat & (rng.random((H, W)) < P.grain * 4 * hot)] = WHITE
+        gr = rng.random((H, W))
+        col[(hot > 0.6) & (col == WHITE) & ~lat & ~((hot > 0.85) & (gr < 0.1))] = ORANGE   # white mostly on the lattice
+        col[core_o & (hot > 0.85) & (col == GREEN)] = ORANGE   # green a ring round the core, never under its white
+        col[core_o & lat & (col == ORANGE) & (rng.random((H, W)) < P.grain * 4.5 * hot)] = WHITE   # on orange only
         col[(hot > 0.6) & (col == MAGENTA) & (dark_side == 0)] = ORANGE
 
     # contours: thin continuous lines, each line one colour
@@ -501,7 +503,9 @@ def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None) -> np.ndarray:
     e = np.zeros((H + 1, W + 2), np.float32)
     e[:H, 1:W + 1] = img
     rows = e.tolist()
-    th = (0.5 + jitter * (rng.random((H, W + 2)) - 0.5) if jitter > 0 else np.full((H, W + 2), 0.5)).tolist()
+    th = 0.5 + jitter * (rng.random((H, W + 2)) - 0.5) if jitter > 0 else np.full((H, W + 2), 0.5)
+    th[:, 1:W + 1] = np.where(img > 0.8, 0.5, th[:, 1:W + 1])   # the brightest steady: solid with even pinholes
+    th = th.tolist()
     out = np.zeros((H, W), bool)
     for y in range(H):
         r0, r1, t0 = rows[y], rows[y + 1], th[y]
