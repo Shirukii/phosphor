@@ -655,6 +655,7 @@ class Dust:
     mote_len: tuple[int, int] = (3, 8)   # dots in a mote: a short dash along its way
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
+    jitter: float = 20.0        # how far each mote's heading strays from its lane's (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
     comb: float = 0.6           # how far the flecks lie along the drift, not the shapes, inside the figure
 
@@ -745,6 +746,10 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     m0 = src[who] + rng.normal(0, 0.6, (n, 2)).astype(np.float32)
     swob = rng.random(k).astype(np.float32) * 6.283           # and a slow wave across the way they go
     mv, far, bend, wob = sv[who], sfar[who], sbend[who], swob[who]
+    if P.jitter > 0:   # each its own heading, a little off its lane's: not blinds
+        ja = rng.normal(0, math.radians(P.jitter), n).astype(np.float32)
+        c, s_ = np.cos(ja)[:, None], np.sin(ja)[:, None]
+        mv = np.concatenate([mv[:, :1] * c - mv[:, 1:] * s_, mv[:, :1] * s_ + mv[:, 1:] * c], 1)
     perp = np.float32([-dv[1], dv[0]])
     mph = rng.random(n).astype(np.float32)
     mlen = rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n, p=None) if P.mote_len[1] > P.mote_len[0] else np.full(n, P.mote_len[0])
