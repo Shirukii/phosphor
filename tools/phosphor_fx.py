@@ -518,6 +518,8 @@ class Streak:
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
     peak: float = 0.0           # share of the figure, its brightest, dithered near solid
+    top: float = 0.05           # share of the figure, its brightest, dithered denser than `most`
+    top_most: float = 0.85      # how dense that gets at its brightest
     features: float = 1.0       # how much darker small dark spots (eyes, mouth) go before the dither
     rim: float = 0.15           # light added along the inside of the silhouette, so it holds
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
@@ -610,7 +612,11 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
     if P.peak > 0 and (a > 0.5).any():   # the brightest light near solid, as on a hat brim or a lit cheek
         q = np.percentile(tt[a > 0.5], 100 * (1 - P.peak))
         tt = np.where(tt > q, np.maximum(tt, np.clip(0.88 + (tt - q) / max(1 - q, 1e-3), 0, 1)), tt)
-    tt = (np.where(tt < P.floor, 0, tt) * P.most).astype(np.float32)
+    top = np.zeros_like(tt)
+    if P.top > 0 and (a > 0.5).any():   # the very brightest a little denser than the cap, still not solid
+        qt = np.percentile(tt[a > 0.5], 100 * (1 - P.top))
+        top = np.clip((tt - qt) / max(1 - qt, 1e-3), 0, 1)
+    tt = (np.where(tt < P.floor, 0, tt) * (P.most + (P.top_most - P.most) * top)).astype(np.float32)
     if P.smooth > 0:   # the source's fine grain out first, or the diffusion draws it as blotches
         tt = cv2.GaussianBlur(tt, (0, 0), P.smooth)
     if P.features > 0:   # eyes, nostrils, mouth: small dark spots go darker, so they read as holes
