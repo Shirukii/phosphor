@@ -534,6 +534,7 @@ class Streak:
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
     even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
     jitter: float = 0.6         # threshold shake in the dither: maze-like chains, not stripes and checks
+    jitter_plain: float = 1.2   # the shake in plain tone, away from edges: looser specks, fewer touching
     kernel: str = 'atkinson'    # error diffusion: 'floyd' (Floyd-Steinberg) or 'atkinson' (diagonal weave, more contrast)
     mesh: float = 0.3           # Atkinson: how much harder a dot lights when the dot above and the one before are lit
     clump: float = 0.0          # in the brightest, holes from noise blurred this much (dots): loose pairs, not a grid
@@ -581,14 +582,18 @@ def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None, hold_j: float = 0.0)
     return out
 
 
-def diffuse_atkinson(img: np.ndarray, jitter: float = 0.0, rng=None, mesh: float = 0.0) -> np.ndarray:
+def diffuse_atkinson(img: np.ndarray, jitter: float | np.ndarray = 0.0, rng=None, mesh: float = 0.0) -> np.ndarray:
     """Atkinson error diffusion, serpentine: only three quarters of the error is passed on, so
     tone pulls towards dark and bright, and mid tones settle into a diagonal weave, not noise."""
     H, W = img.shape
     e = np.zeros((H + 2, W + 4), np.float32)
     e[:H, 2:W + 2] = img
     rows = e.tolist()
-    th = (0.5 + jitter * (rng.random((H, W + 4)) - 0.5)).tolist() if jitter > 0 else [[0.5] * (W + 4)] * H
+    if np.ndim(jitter):   # a shake per dot
+        jp = np.zeros((H, W + 4), np.float32); jp[:, 2:W + 2] = jitter
+        th = (0.5 + jp * (rng.random((H, W + 4)) - 0.5)).tolist()
+    else:
+        th = (0.5 + jitter * (rng.random((H, W + 4)) - 0.5)).tolist() if jitter > 0 else [[0.5] * (W + 4)] * H
     out = np.zeros((H, W), bool)
     for y in range(H):
         r0, r1, r2, t0 = rows[y], rows[y + 1], rows[y + 2], th[y]
@@ -679,6 +684,10 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         nb_, lab_, st_, _ = cv2.connectedComponentsWithStats(bl, connectivity=8)
         keep = st_[:, 4] >= P.plane; keep[0] = False
         big_light = cv2.dilate((keep[lab_]).astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
+    # the threshold shake: more in plain tone (loose, maze-like specks), less on edges (crisp features)
+    ev = cv2.GaussianBlur(A['edge'], (0, 0), 1.5)
+    ev = np.clip(ev / (np.percentile(ev[a > 0.5], 85) + 1e-6), 0, 1) if (a > 0.5).any() else np.zeros_like(ev)
+    jmap = (P.jitter + (P.jitter_plain - P.jitter) * (1 - ev) * (a > 0.5)).astype(np.float32)   # off the figure: as ever
     out = np.zeros((P.frames, H, W), np.uint8)
     for f in range(P.frames):
         s = f / P.frames
@@ -686,7 +695,9 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         o = f % 4                       # Floyd-Steinberg runs one way: turn it each frame so no direction shows
         nz = noisy.T if o & 2 else noisy
         nz = nz[:, ::-1] if o & 1 else nz
-        bits = (diffuse_atkinson(np.ascontiguousarray(nz), P.jitter, rng, P.mesh) if P.kernel == 'atkinson'
+        jz = jmap.T if o & 2 else jmap
+        jz = jz[:, ::-1] if o & 1 else jz
+        bits = (diffuse_atkinson(np.ascontiguousarray(nz), np.ascontiguousarray(jz), rng, P.mesh) if P.kernel == 'atkinson'
                 else diffuse(np.ascontiguousarray(nz), P.jitter, rng))
         bits = bits[:, ::-1] if o & 1 else bits
         bits = bits.T if o & 2 else bits
