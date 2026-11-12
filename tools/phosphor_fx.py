@@ -535,6 +535,7 @@ class Streak:
     even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
     jitter: float = 0.6         # threshold shake in the dither: maze-like chains, not stripes and checks
     jitter_plain: float = 1.2   # the shake in plain tone, away from edges: looser specks, fewer touching
+    edge_pct: float = 85.0      # the edge strength (percentile in the figure) that counts as a full edge
     kernel: str = 'atkinson'    # error diffusion: 'floyd' (Floyd-Steinberg) or 'atkinson' (diagonal weave, more contrast)
     mesh: float = 0.3           # Atkinson: how much harder a dot lights when the dot above and the one before are lit
     clump: float = 0.0          # in the brightest, holes from noise blurred this much (dots): loose pairs, not a grid
@@ -686,7 +687,7 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         big_light = cv2.dilate((keep[lab_]).astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
     # the threshold shake: more in plain tone (loose, maze-like specks), less on edges (crisp features)
     ev = cv2.GaussianBlur(A['edge'], (0, 0), 1.5)
-    ev = np.clip(ev / (np.percentile(ev[a > 0.5], 85) + 1e-6), 0, 1) if (a > 0.5).any() else np.zeros_like(ev)
+    ev = np.clip(ev / (np.percentile(ev[a > 0.5], P.edge_pct) + 1e-6), 0, 1) ** 2 if (a > 0.5).any() else np.zeros_like(ev)
     jmap = (P.jitter + (P.jitter_plain - P.jitter) * (1 - ev) * (a > 0.5)).astype(np.float32)   # off the figure: as ever
     out = np.zeros((P.frames, H, W), np.uint8)
     for f in range(P.frames):
