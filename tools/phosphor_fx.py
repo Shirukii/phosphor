@@ -196,7 +196,7 @@ class Glow:
     halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
     feat_fill: float = 0.5      # how densely the features (eyes, mouth, folds) are drawn where lit round them
-    hot: float = 0.05           # share of the figure, its brightest broad light, coloured in calm bands
+    hot: float = 0.025          # share of the figure, its brightest broad light, coloured in calm bands
     core: float = 0.05          # share of the figure, its brightest, that may go near solid
     most: float = 0.95          # the densest the dots get: the brightest light near solid
     even: float = 0.25          # how much of the locally evened light (CLAHE) the tone takes
@@ -661,6 +661,7 @@ class Dust:
     most: float = 0.55          # the densest the specks get, in the brightest light
     clump: float = 0.0          # how much the specks clump (0: even white noise)
     outline: float = 0.6        # how much of the silhouette and strongest edges is drawn as bright strokes
+    dust_floor: float = 0.1     # the least density in the intact figure (a cut-out only): its shade doesn't go black
     pair: float = 0.6           # share of lone body specks given a neighbour along the shapes
     shade_lev: float = 0.6      # how far each speck's grey follows the light (0: any grey)
     order: float = 0.85         # how much of the body is an ordered (Bayer) dither, not noise: crisper shading
@@ -729,6 +730,11 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     if (a > 0.5).mean() > 0.97:   # nothing cut out: no silhouette to draw
         sil[:] = 0
     dens = (np.clip(tt * P.most + P.edges * (0.7 * sil + 0.4 * ed ** 1.5 * (0.25 + 0.75 * tt)), 0, 0.7) * (1 - P.dissolve * sw)).astype(np.float32)
+    if P.dust_floor > 0 and 0.02 < (a > 0.5).mean() < 0.97:   # the shade of the intact figure keeps a sparse grain
+        fz = (dens < P.dust_floor) & (a > 0.5) & (sw < 0.2)   # where the floor holds: its specks stay, lone or not
+        dens = np.maximum(dens, P.dust_floor * (a > 0.5) * np.clip(1 - 3 * sw, 0, 1)).astype(np.float32)
+    else:
+        fz = np.zeros((H, W), bool)
     many = H * W / 540 ** 2                                  # the counts, for this size
 
     bay = bayer(H, W)
@@ -812,7 +818,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         if P.shade_lev > 0:   # brighter specks where it's lit: the greys follow the light, not chance
             lev = np.clip(np.round((1 - P.shade_lev) * lev + P.shade_lev * (1.5 + (NL - 1) * np.sqrt(tt))), 1, NL).astype(int)
         if P.outline > 0:   # the silhouette and strongest edges as bright strokes; stray dim specks go
-            lit &= ~((lev <= 3) & (cv2.filter2D(lit.astype(np.uint8), -1, k8, borderType=cv2.BORDER_CONSTANT) == 0))
+            lit &= ~((lev <= 3) & (cv2.filter2D(lit.astype(np.uint8), -1, k8, borderType=cv2.BORDER_CONSTANT) == 0) & ~fz)
             stroke = rim & (rng.random((H, W)) < P.outline * (1 - 0.8 * sw))   # thinning where the figure comes apart
             lit |= stroke
             lev = np.where(stroke, NL - rng.integers(0, 2, (H, W)), lev)
