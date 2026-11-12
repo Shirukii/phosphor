@@ -301,7 +301,8 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     th = cv2.morphologyEx(cv2.GaussianBlur(t, (0, 0), 1.0), cv2.MORPH_BLACKHAT, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
     fl = np.percentile(th[body], 92) if body.any() else 1
     feat = (th > max(fl, 0.03)) & body & (A['coh'] < 0.7)
-    p = np.where(feat & ~(hot > 0.5), np.maximum(p, P.feat_fill * np.clip(soft * 4, 0, 1)), p)   # drawn, not holes
+    sparse = (cv2.blur((thr < p).astype(np.float32), (15, 15)) < 0.4) & (A['coh'] < 0.4)   # not over busy texture
+    p = np.where(feat & sparse & ~(hot > 0.5), np.maximum(p, P.feat_fill * np.clip(soft * 4, 0, 1)), p)   # drawn, not holes
     p = np.where((hot > 0.5) & body & ~feat, np.maximum(p, P.hot_fill * lift), p)
     if P.hot_fill * lift > 0.85:   # no holes in a solid core, but its features show through
         hot_solid = (hot > 0.6) & body & ~feat
@@ -442,6 +443,10 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         for j in range(P.stream_len[1]):
             on = (j < grow) & (j % step == 0)
             plot(img, (lsrc + ldv * j)[on], runs[on, j])
+        if not near.all():   # off the figure, no lone crumbs: only dashes and blobs
+            n_, lab, st, _ = cv2.connectedComponentsWithStats((img > 0).astype(np.uint8), connectivity=8)
+            crumb = (st[:, 4] < 3); crumb[0] = False
+            img[crumb[lab] & ~near] = 0
         out[f] = img
     return out, pal
 
@@ -635,13 +640,13 @@ class Dust:
     dissolve: float = 0.97      # how much of the far side's body is gone (to motes)
     spare_lit: bool = True      # drift the other way if the far side holds the most light
     side: float = 0.7           # how much of the figure, from its far side along the angle, dissolves
-    motes: int = 5000           # particles drifting off it
+    motes: int = 3500           # particles drifting off it
     reach: int = 220            # how far they go in a loop, in dots
     trail: int = 16             # motes to a trail, following one another
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
     sparkles: int = 5           # four-point glints on the brightest light, each for part of the loop
-    mote_len: tuple[int, int] = (2, 7)   # dots in a mote: a short dash along its way
+    mote_len: tuple[int, int] = (3, 10)  # dots in a mote: a short dash along its way
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
@@ -751,6 +756,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
 
     spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
     sph, sln = rng.random(len(spk)), rng.integers(2, 4, len(spk))
+    inner = cv2.erode((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & (sw < 0.3)
+    near = cv2.dilate((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     out = np.zeros((P.frames, H, W), np.uint8)
     for f in range(P.frames):
         s = f / P.frames
@@ -784,6 +791,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         vel = mv * far[:, None] + perp * (2 * bend * far * u + 6 * np.pi * np.cos(wob + 6.283 * u))[:, None]
         vel /= np.linalg.norm(vel, axis=1, keepdims=True) + 1e-6   # each dash along the way it is going
         vis = rng.random(n) < fade ** 0.7                 # they fade by thinning out, each one staying crisp
+        pi_ = np.clip(np.round(pos).astype(int), 0, [W - 1, H - 1])
+        vis &= ~inner[pi_[:, 1], pi_[:, 0]]               # none over the whole of the figure: it stays clean
         ml = np.where(vis, np.clip(mlev, 1, NL), 0).astype(np.uint8)
         for j in range(P.mote_len[1]):
             on = vis & (j < mlen) & ~blob
