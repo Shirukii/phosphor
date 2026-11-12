@@ -766,11 +766,13 @@ class Dust:
     clump_size: float = 0.9     # the blur that clumps them (dots): finer keeps small features
     grain_wide: float = 1.0     # how much wider than tall the grains are (1: round)
     lone: float = 1.0           # share of specks touching no other at their sides that go
-    outline: float = 0.6        # how much of the silhouette and strongest edges is drawn as bright strokes
+    unplus: float = 1.0         # share of '+'-shaped grains given a corner, so they read as blocks
+    outline: float = 0.3        # how much of the silhouette and strongest edges is drawn as bright strokes
     dust_floor: float = 0.1     # the least density in the intact figure (a cut-out only): its shade doesn't go black
     pair: float = 0.6           # share of lone body specks given a neighbour along the shapes
     shade_lev: float = 0.6      # how far each speck's grey follows the light (0: any grey)
     grey_spread: float = 0.15   # how far each speck's grey strays from its step (0: a few flat steps)
+    grey_shift: float = -0.1    # all the specks' greys moved this far (darker below 0)
     grey_patch: float = 0.16    # how far greys shift patch by patch (0: no patches)
     grey_patch_size: float = 12.0  # how wide the grey patches are (dots of blur)
     order: float = 0.15         # how much of the body is an ordered (Bayer) dither, not noise: a little keeps features crisp
@@ -787,7 +789,7 @@ class Dust:
     trail: int = 16             # motes to a trail, following one another
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
-    sparkles: int = 9           # four-point glints on the brightest light, each for part of the loop
+    sparkles: int = 3           # four-point glints on the brightest light, each for part of the loop
     specks_glint: int = 15      # small glints out in the drift, each twinkling for part of the loop
     haze: float = 0.12          # faint dark-grey dots round the lit ones (0: none)
     flat: bool = False          # one flat grey for everything (no shades, no haze), as some dust art is
@@ -822,7 +824,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     FINE, FINE_LO = (0 if P.flat or P.grey_spread <= 0 else 32), 0.25
     if FINE:   # a fine ramp of greys past the steps (and the haze), that each speck's grey is shaken onto
         pal = np.concatenate([pal, (np.linspace(FINE_LO, 1.0, FINE)[:, None] * c[None]).astype(np.uint8)])
-        gshake = (rng.normal(0, P.grey_spread, (H, W))).astype(np.float32)   # fixed: a still speck keeps its grey
+        gshake = (P.grey_shift + rng.normal(0, P.grey_spread, (H, W))).astype(np.float32)   # fixed: a still speck keeps its grey
         if P.grey_patch > 0:   # and patches of lighter and darker grey, a few dots across, under the speckle
             gp = cv2.GaussianBlur(rng.standard_normal((H, W)).astype(np.float32), (0, 0), P.grey_patch_size)
             gshake += P.grey_patch * gp / (gp.std() + 1e-6)
@@ -1049,6 +1051,15 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
                 big = 0.07 <= ph_ <= 0.28
                 pts = [(gx_, gy_)] + [(gx_ + ox, gy_ + oy) for ox in (-1, 0, 1) for oy in (-1, 0, 1) if (ox or oy) and (big or ox == 0 or oy == 0) and rng.random() < 0.75]
                 plot(img, np.float32(pts), np.uint8([int(gl)] + [int(rng.integers(2, int(gl))) for _ in pts[1:]]))
+        if P.unplus > 0:   # a speck with four side neighbours and no corners is a '+': fill a corner, so grains are blocks
+            on_ = img > 0
+            pd = np.pad(on_, 1)
+            arms = pd[1:-1, 2:] & pd[1:-1, :-2] & pd[2:, 1:-1] & pd[:-2, 1:-1]
+            corn = pd[2:, 2:] | pd[2:, :-2] | pd[:-2, 2:] | pd[:-2, :-2]
+            py, px = np.nonzero(on_ & arms & ~corn & (rng.random((H, W)) < P.unplus))
+            if len(py):
+                cy = np.clip(py + rng.choice([-1, 1], len(py)), 0, H - 1); cx = np.clip(px + rng.choice([-1, 1], len(py)), 0, W - 1)
+                img[cy, cx] = img[py, px]
         if P.haze > 0 and not P.flat:   # a faint dark-grey haze hugging the lit dots, a dot or two out: the specks glow
             hz = cv2.GaussianBlur((img > 0).astype(np.float32), (0, 0), 1.2)
             hr = rng.random((H, W))
@@ -1144,7 +1155,7 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
         P.flat = True
         P.grain_wide = 2.0   # flat dust art's grains run level
         P.clump_size, P.order, P.comb = 0.5, 0.3, 0.6   # finer grain, flecks combed with the drift
-        P.fleck_turn, P.specks_glint = 0.0, 40
+        P.fleck_turn, P.specks_glint, P.unplus, P.outline, P.sparkles = 0.0, 40, 0.0, 0.6, 9
     if frames:
         P.frames = frames
     if colour and isinstance(P, (Streak, Dust)):
