@@ -207,9 +207,9 @@ class Glow:
     radius: float = 1.6         # and its radius (dots)
     order: float = 0.3          # ordered (Bayer) against random dither: 1 all ordered
     cross: float = 0.7          # how much the random dither's noise is shared with the dots beside, above and below
-    hue: float = 0.1            # how much neighbouring dots' colours scatter
+    hue: float = 0.02           # how much neighbouring dots' colours scatter
     zones: float = 10.0         # how broad the light is that sets the colour (dots)
-    mix: float = 0.7            # how far neighbouring zones checker into each other, dot by dot
+    mix: float = 0.5            # how far neighbouring zones checker into each other, dot by dot
     scatter: float = 1.4        # random spread of the colour steps round the light's top end
     edge_mix: float = 0.6       # how far the hot core's edge mixes its colour with the light round it
     focus: float = 0.3          # how far the colour gathers its warmth round the main light (0: anywhere it is bright)
