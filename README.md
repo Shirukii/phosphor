@@ -66,24 +66,25 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
    folder of PNGs per state, then per background), also saved to `out/<name>/`.
 7. **Glow / Streak / Dust** (the switch above the preview): the same cut-out and frame as a looping clip
    in another style, rendered on the server. Pick its size (dots across), length, scale and, for
-   glow, the way the light streams; then download a GIF (for X: up to 15 MB) or an animated WebP (lossless, a fraction of the size), saved
+   glow and dust, the way the light streams or the dust drifts; then download a GIF (for X: up to 15 MB) or an animated WebP (lossless, a fraction of the size), saved
    to `out/<name>/fx/` too.
 
 ### Styled clips
 
 `tools/phosphor_fx.py` draws a picture as a loop of dots on black, in one of three styles:
 
-- **glow:** six colours, ordered-dithered on a fine grid: sparse blue dots in the shade, green,
-  orange and white where the light gathers, a sharpened halo along the edges with pink on their
-  dark side, and a dense warm rim round the figure. The shape holds still; light runs through it in
-  streaks and a few dotted trails leave it, all along one line (`--angle`: 0 across, 90 up and
-  down). 3 s at 24 fps.
-- **streak:** one colour (red by default) in three shades on a coarse grid, error-diffused afresh
-  each frame so the figure boils, short dashes along its shapes (and drawing the texture of its
-  shaded parts, where the dither leaves black), clean black round it, and broken rain streaking
-  across. 1 s at 24 fps.
-- **dust:** streak's engine, sparse and grey and without rain: the figure as specks and short
-  dashes along its form, its dim parts dissolving into the black. 1 s at 24 fps.
+- **glow:** seven colours, ordered-dithered on a fine grid: sparse blue dots in the shade, green,
+  orange and white in zones where the light gathers, contours in salmon, orange, blue and pink, pink
+  on the dark side of edges, and a rim of thin parallel lines round the figure. The shape holds
+  still; light and sparks run through it in slanted streaks, and bundles of lines grow out of its
+  outline and draw back, along one line (`--angle`: 0 across, 90 up and down). 3 s at 24 fps.
+- **streak:** one colour (red by default) on a coarse grid, error-diffused afresh each frame so the
+  figure boils, short dashes along its shapes (and drawing the texture of its shaded parts, where
+  the dither leaves black), clean black round it but for loose specks gathering towards the bottom, and slanted rain
+  flashing up in new places every frame. 1 s at 24 fps.
+- **dust:** grey specks of many shades, clumped and boiling, densest in the light and gathering on
+  the edges, with short flecks along the shapes; from its far side (along `--angle`) the figure
+  comes apart in trails of motes that drift off and fade. 2 s at 24 fps.
 
 ```bash
 python tools/phosphor_fx.py in/picture.png --cutout
@@ -92,9 +93,10 @@ python tools/phosphor_fx.py in/picture.png --cutout
 writes `out/picture/fx/glow.gif`, `glow.webp`, `glow/0000.png`… and the same for `streak` and `dust`. A
 picture with transparency is taken as cut out already; `--cutout` cuts any other one out, and
 without either the whole picture is used. `--style`, `--long` (dots across the longer side: glow
-540, streak 270), `--aspect` (`WxH`, default `1x1`), `--scale` (px per dot in the files: glow 2,
-streak 4), `--frames`, `--fps`, `--angle` (glow), `--colour` (streak, dust), `--seed`. All three work
-best on detailed, lit pictures: the edges and the light are what they draw.
+540, streak 270, dust 540), `--aspect` (`WxH`, default `1x1`), `--scale` (px per dot in the files:
+glow 2, streak 4, dust 2), `--frames`, `--fps`, `--angle` (glow, dust), `--colour` (streak, dust),
+`--seed` (by default one from the picture, so the same picture always comes out the same). All three
+work best on detailed, lit pictures: the edges and the light are what they draw.
 
 The server keeps pictures in memory while it runs, and only listens on localhost. It has no
 dependencies past the three above (`--port`, `--host` to change where it listens).

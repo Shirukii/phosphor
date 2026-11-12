@@ -183,7 +183,7 @@ def make(q: dict) -> tuple[dict, dict | None]:
 
 def styled(q: dict) -> tuple[fx.Frames, str]:
     """A styled clip for a request: picture, cut-out, view, the map's size (for the aspect), style,
-    long (the clip's longest side, in dots), frames, colour (streak, dust), angle (glow). The last one is kept with the picture,
+    long (the clip's longest side, in dots), frames, colour (streak, dust), angle (glow, dust). The last one is kept with the picture,
     so a download right after its preview isn't drawn again."""
     p = picture(q)
     style = str(q.get('style'))
