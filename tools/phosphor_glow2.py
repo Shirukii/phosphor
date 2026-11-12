@@ -46,9 +46,9 @@ class Glow2:
     plane_heat: float = 0.80   # the heat the brightest plane reaches
     plane_gamma: float = 1.6   # how fast the planes thin out below it
     line_min: int = 14         # the shortest line kept (dots): no worms on rough texture
-    source: float = 0.6        # how much heat the picture's light source adds (0: none)
+    source: float = 0.0        # how much heat the picture's light source adds (0: none; off: 0.6 tied the blind pick 6 to 6)
     source_size: float = 0.04  # how far that heat reaches round it, as a share of the frame
-    source_spill: float = 0.06 # how much of it lights the black round the source
+    source_spill: float = 0.04 # how much of it lights the black round the source
     source_xy: tuple | None = None   # the source set by hand (x, y, 0..1 of the frame)
     spread: float = 0.6        # how far the dither may reach for colours off the target
     # heat -> colour: black, blue, teal, salmon, pale
@@ -162,8 +162,10 @@ def glow2(rgba: np.ndarray, P: Glow2 | None = None, invert: bool | None = None) 
     near = cv2.GaussianBlur(v, (0, 0), P.bloom_size)
     heat = v * (1 + P.bloom * near) + P.halo * near
     if P.source:
-        lit = np.minimum(np.maximum(v, emissive(rgba, v0) - P.black) * 2, 1)
-        heat = heat + P.source * source(rgba, v0, P) * (P.source_spill + (1 - P.source_spill) * lit)
+        # the source heats the light that is there, in proportion: the surface's detail stays, nothing fills flat
+        near_source = source(rgba, v0, P)
+        heat = heat * (1 + P.source * near_source) \
+            + P.source_spill * P.source * near_source
     heat = np.clip(heat, 0, 1)
     xs = np.array([s for s, _ in P.ramp], np.float32)
     cs = np.array([c for _, c in P.ramp], np.float32)
