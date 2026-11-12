@@ -14,9 +14,9 @@
           every frame so it boils, short dashes along its shapes (and over the texture of its
           shaded parts, which the dither leaves black), loose specks gathering towards the bottom,
           and slanted rain flashing up in new places every frame.
-  dust    grey specks of many shades, clumped and boiling, densest in the light and gathering on
-          the edges, with short flecks along the shapes; from its far side along --angle the
-          figure comes apart in trails of motes that drift off and fade.
+  dust    grey specks on an ordered dither, brighter in the light, the outline and strongest edges
+          as bright strokes, short flecks along the shapes and a few glints; from its darker side
+          along --angle the figure comes apart in lanes of dashes that drift off and fade.
 
 These follow the looks of the references: glow measured at ~9% of dots lit, most of them blue,
 ~1.4% of the frame changing from one frame to the next; streak a coarse, boiling stipple on clean
@@ -189,6 +189,9 @@ class Glow:
     gain: float = 1.0           # more or less light than that
     solid: float = 0.2          # share of the figure lit near solid (picks the curve per picture; 0: use gamma)
     gamma: float = 3.0          # tone curve (higher: the shade empties out more)
+    fill: float = 0.65          # the densest the dots get outside the brightest light
+    hot: float = 0.05           # share of the figure, its brightest broad light, coloured in calm bands
+    core: float = 0.05          # share of the figure, its brightest, that may go near solid
     most: float = 0.95          # the densest the dots get: the brightest light near solid
     even: float = 0.25          # how much of the locally evened light (CLAHE) the tone takes
     sharpen: float = 1.0        # unsharp amount: the halo along edges
@@ -196,7 +199,6 @@ class Glow:
     order: float = 0.55         # ordered (Bayer) against random dither: 1 all ordered
     hue: float = 0.1            # how much neighbouring dots' colours scatter
     zones: float = 10.0         # how broad the light is that sets the colour (dots)
-    dense_mix: float = 0.25     # more scatter where the dots are dense: masses shimmer in several hues
     mix: float = 0.7            # how far neighbouring zones checker into each other, dot by dot
     edge_hue: float = 0.05      # how far fine edges push the colour up the ramp
     lines: float = 0.15         # how much of the contours is drawn as a line
@@ -205,10 +207,11 @@ class Glow:
     rim_lines: int = 2          # parallel lines along a rim, a dot wide, a dot of black between
     rim_level: float = 0.985    # which edges get one (percentile of edge strength; the outline always)
     line_level: float = 0.99    # which edges count as contours (percentile of edge strength)
-    ramp: tuple = (0.0, 0.3, 0.8, 0.965, 0.99)  # rank among lit dots where blue, blue 2, green, orange, white sit
+    ramp: tuple = (0.0, 0.3, 0.8, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
     floor: float = 0.05         # the least light in the figure: its shade never quite goes black
     fringe: float = 0.8         # magenta on the dark side of bright edges
     warmth: float = 0.15        # how far the picture's own warm light leans to orange
+    twinkle: float = 0.06       # share of dots given a fresh threshold each frame
     shimmer: float = 0.01       # share of dots that flicker over the loop
     flow: float = 0.35          # light running through the figure in streaks along the angle
     flow_speed: float = 6.0     # px per frame
@@ -216,7 +219,7 @@ class Glow:
     flow_width: float = 0.8     # and how wide (px, soft): thin sweeps
     sparks: float = 0.04        # share of the scrolling field lit as sparks running through the light
     tilt: float = -20           # the flow's slant from the angle (degrees)
-    streams: int = 30           # bundles of lines streaming out of the picture
+    streams: int = 20           # bundles of lines streaming out of the picture
     strands: tuple[int, int] = (1, 4)   # lines in a bundle, 2 dots apart
     stream_len: tuple[int, int] = (30, 120)  # dots in one, at its longest
     angle: float = 0            # the way they go (degrees: 0 right, 90 down)
@@ -265,13 +268,19 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
                     best = (g, kk, sl)
             gam, k, _ = best
     p = np.clip(P.gain * k * ts ** gam, 0, P.most)
+    if P.fill < P.most and body.any():   # solid only in the brightest light; elsewhere the dither keeps gaps
+        top = ts > np.quantile(ts[body], 1 - P.core)
+        p = np.where(top, p, np.minimum(p, P.fill))
     dark_side = np.clip(-hp * 7, 0, 1) * np.clip(soft * 3, 0, 1)   # just off something bright
     g0 = cv2.GaussianBlur(t, (0, 0), 2.0)
     g0 = np.hypot(cv2.Sobel(g0, cv2.CV_32F, 1, 0), cv2.Sobel(g0, cv2.CV_32F, 0, 1))
     big = g0 > (np.percentile(g0[a > 0.5], 95) if (a > 0.5).any() else g0.max())
     dark_side *= cv2.dilate(big.astype(np.uint8), np.ones((5, 5), np.uint8)) > 0   # only by the strong edges, not over fine texture
     p = np.maximum(p, P.fringe * 0.7 * dark_side)
-    p = np.maximum(p, P.floor * (a > 0.5) * (soft > 0.04))   # the dark of the figure keeps a sparse blue dither
+    shade_min = 0.04
+    if body.mean() > 0.97:   # nothing cut out: the dim background isn't the figure's shade
+        shade_min = max(shade_min, float(np.percentile(soft, 50)))
+    p = np.maximum(p, P.floor * (a > 0.5) * (soft > shade_min))   # the dark of the figure keeps a sparse blue dither
     thr = P.order * bayer(H, W) + (1 - P.order) * rng.random((H, W), np.float32)
 
     # colour per dot: by the broad light, in zones along one ramp (blue, blue 2, green, orange,
@@ -279,7 +288,9 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     # colours far apart side by side. Where the ramp's steps fall is set by rank among the lit
     # dots, so every picture gets the references' mix (blue the most by far, white the least).
     zone = cv2.GaussianBlur(ts, (0, 0), P.zones)
-    v = zone + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, 1, (H, W)) * (P.hue + P.dense_mix * cv2.GaussianBlur(p, (0, 0), 3)) * (1 - 0.75 * A['flat'])
+    hot = zone > (np.quantile(zone[body], 1 - P.hot) if body.any() else 2)   # the hot core: calm, banded colour
+    hot = cv2.GaussianBlur(hot.astype(np.float32), (0, 0), 2)
+    v = zone + P.edge_hue * np.clip(hp * 5, 0, 1) + P.warmth * A['warm'] * zone + rng.normal(0, P.hue, (H, W)) * (1 - 0.75 * A['flat']) * (1 - 0.85 * hot)
     lit0 = thr < p
     anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
     r = np.interp(v, np.maximum.accumulate(anchors + np.arange(5) * 1e-6), np.arange(5))
@@ -346,7 +357,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         edge0 = (din < 5) & (inner > 0)
     else:                             # the whole picture: from its strongest edges
         edge0 = gm > np.percentile(gm, 97)
-    seedw = (np.maximum(lit0, 0.3) * (0.15 + ts) ** 2 * edge0).astype(np.float32)
+    seedw = (np.maximum(lit0, 0.3) * (0.15 + ts) ** 4 * edge0).astype(np.float32)   # from the brightest light
     srcs = seed_where(seedw, P.streams, rng)
     nb = len(srcs)
     th = math.radians(P.angle)
@@ -403,7 +414,11 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
                 pf = np.maximum(pf, 0.9 * (spark[fv, np.round(fu - P.flow_speed * f).astype(int) % Lu] & where_sp))
         else:
             pf = p
-        lit = np.mod(thr + flick * s, 1) < pf
+        th_f = np.mod(thr + flick * s, 1)
+        if P.twinkle > 0:   # a few dots each frame take a fresh threshold: the light glitters
+            tw = (rng.random((H, W)) < P.twinkle * (1 - hot)) & ~held & (p > 0.1)   # only where there is light
+            th_f = np.where(tw, rng.random((H, W)), th_f)
+        lit = th_f < pf
         img = np.where(lit, col, 0).astype(np.uint8)
         u = np.mod(ph + s, 1)
         grow = np.clip(np.minimum(u * 3, (1 - u) * 3), 0, 1) * L      # out, hold, back in
@@ -431,6 +446,7 @@ class Streak:
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
     even: float = 0.5           # how much of the locally evened light (CLAHE) the tone takes; the rest plain
+    jitter: float = 0.6         # threshold shake in the dither: maze-like chains, not stripes and checks
     hold: float = 0.5           # share of the figure's dots held from one dither all loop (less boil)
     boil: float = 0.05          # noise added before each frame's dither: how much it boils
     stray: float = 0.0          # how much of that noise is let into the background
@@ -446,23 +462,25 @@ class Streak:
     rain_gaps: float = 0.2      # gaps in a streak (0: solid): dotted, broken runs
 
 
-def diffuse(img: np.ndarray) -> np.ndarray:
+def diffuse(img: np.ndarray, jitter: float = 0.0, rng=None) -> np.ndarray:
     """Floyd-Steinberg error diffusion, serpentine (each row the other way), so the dots run no
-    one way: plain left-to-right scanning spaces them out across and stacks them up and down."""
+    one way: plain left-to-right scanning spaces them out across and stacks them up and down.
+    `jitter` shakes the threshold, which breaks up the stripes and checks it settles into at mid grey."""
     H, W = img.shape
     e = np.zeros((H + 1, W + 2), np.float32)
     e[:H, 1:W + 1] = img
     rows = e.tolist()
+    th = (0.5 + jitter * (rng.random((H, W + 2)) - 0.5) if jitter > 0 else np.full((H, W + 2), 0.5)).tolist()
     out = np.zeros((H, W), bool)
     for y in range(H):
-        r0, r1 = rows[y], rows[y + 1]
+        r0, r1, t0 = rows[y], rows[y + 1], th[y]
         if y % 2 == 0:
             xs, d = range(1, W + 1), 1
         else:
             xs, d = range(W, 0, -1), -1
         for x in xs:
             v = r0[x]
-            if v >= 0.5:
+            if v >= t0[x]:
                 out[y, x - 1] = True
                 v -= 1
             if v:
@@ -521,7 +539,7 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
         o = f % 4                       # Floyd-Steinberg runs one way: turn it each frame so no direction shows
         nz = noisy.T if o & 2 else noisy
         nz = nz[:, ::-1] if o & 1 else nz
-        bits = diffuse(np.ascontiguousarray(nz))
+        bits = diffuse(np.ascontiguousarray(nz), P.jitter, rng)
         bits = bits[:, ::-1] if o & 1 else bits
         bits = bits.T if o & 2 else bits
         if P.hold > 0:   # some of the figure holds still all loop: it shimmers rather than boils
@@ -588,13 +606,14 @@ class Dust:
     fleck_len: tuple[int, int] = (2, 3)
     angle: float = 0            # the way the dust drifts off (degrees: 0 right, 90 down)
     dissolve: float = 0.97      # how much of the far side's body is gone (to motes)
-    spare_detail: bool = True   # drift the other way if the far side holds the most detail
+    spare_lit: bool = True      # drift the other way if the far side holds the most light
     side: float = 0.7           # how much of the figure, from its far side along the angle, dissolves
     motes: int = 5000           # particles drifting off it
     reach: int = 220            # how far they go in a loop, in dots
     trail: int = 16             # motes to a trail, following one another
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
-    blobs: int = 20             # soft grey blots among them
+    blobs: int = 60             # soft grey blots among them
+    sparkles: int = 5           # four-point glints on the brightest light, each for part of the loop
     mote_len: tuple[int, int] = (2, 6)   # dots in a mote: a short dash along its way
     bend: float = 0.3           # how far the lanes curve off the angle
     comb: float = 0.6           # how far the flecks lie along the drift, not the shapes, inside the figure
@@ -624,10 +643,10 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     else:
         lo, hi = proj.min(), proj.max()
     pn = np.clip((proj - lo) / max(hi - lo, 1), 0, 1)
-    if P.spare_detail and inside.any():   # the side with more detail (a face, say) stays; the other goes
-        g = A['edge'] * inside
+    if P.spare_lit and inside.any():   # the lit side (a face, mostly) stays; the darker side goes
+        g = tt * inside
         far, near = float((g * (pn > 0.5)).sum()), float((g * (pn <= 0.5)).sum())
-        if far > 1.25 * near:
+        if far > near:
             dv = -dv
             proj = -proj
             lo, hi = -hi, -lo
@@ -636,6 +655,9 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     ed = A['edge'] * np.clip(A['plain'] * 4, 0, 1) * (a > 0.5)
     sil = cv2.GaussianBlur(np.hypot(cv2.Sobel(a, cv2.CV_32F, 1, 0), cv2.Sobel(a, cv2.CV_32F, 0, 1)), (0, 0), 0.7)
     sil = np.clip(sil / (sil.max() + 1e-6) * 3, 0, 1) * (a > 0.3)
+    sil[:3], sil[-3:], sil[:, :3], sil[:, -3:] = 0, 0, 0, 0   # the frame's edge is no outline
+    if (a > 0.5).mean() > 0.97:   # nothing cut out: no silhouette to draw
+        sil[:] = 0
     dens = (np.clip(tt * P.most + P.edges * (0.7 * sil + 0.4 * ed ** 1.5 * (0.25 + 0.75 * tt)), 0, 0.7) * (1 - P.dissolve * sw)).astype(np.float32)
     many = H * W / 540 ** 2                                  # the counts, for this size
 
@@ -689,6 +711,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     fdir = (P.comb + (1 - P.comb) * sw)[..., None] * dv + ((1 - P.comb) * (1 - sw))[..., None] * fdir   # combed by the drift where it comes apart
     fdir /= np.linalg.norm(fdir, axis=-1, keepdims=True) + 1e-6
 
+    spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
+    sph, sln = rng.random(len(spk)), rng.integers(2, 4, len(spk))
     out = np.zeros((P.frames, H, W), np.uint8)
     for f in range(P.frames):
         s = f / P.frames
@@ -732,6 +756,14 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             lvv = np.minimum(blev[bi], ml[bi, None]).reshape(-1)
             ok = ~np.isnan(pts[:, 0])
             plot(img, pts[ok], lvv[ok])
+        # sparkles: a few four-point glints on the brightest light, each lit for part of the loop
+        for (sx, sy), sp, sl in zip(spk, sph, sln):
+            on = np.mod(s - sp, 1) < 0.25
+            if on:
+                arm = sl if np.mod(s - sp, 1) < 0.15 else max(1, sl - 1)
+                pts = [(sx, sy)] + [(sx + d * j, sy) for d in (-1, 1) for j in range(1, arm + 1)] + [(sx, sy + d * j) for d in (-1, 1) for j in range(1, arm + 1)]
+                lv8 = [NL] + [NL - 1] * (len(pts) - 1)
+                plot(img, np.float32(pts), np.uint8(lv8))
         out[f] = img
     return out, pal
 
