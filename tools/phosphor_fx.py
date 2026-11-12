@@ -498,7 +498,7 @@ class Streak:
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
-    peak: float = 0.06          # share of the figure, its brightest, dithered near solid
+    peak: float = 0.12          # share of the figure, its brightest, dithered near solid
     features: float = 1.0       # how much darker small dark spots (eyes, mouth) go before the dither
     rim: float = 0.15           # light added along the inside of the silhouette, so it holds
     smooth: float = 0.7         # blur on the light before the dither (dots): clean worms, not blotches
