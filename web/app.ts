@@ -668,16 +668,16 @@ type Style = Exclude<Mode, 'live'>;
 const FX_COLOURS: [string, string][] = [['red', '#ee1111'], ['white', '#f2f2f2'], ['grey', '#d8d8d8'], ['green', '#4fe08a'], ['blue', '#6f93e8'], ['amber', '#ffb347'], ['rose', '#f07aa6']];
 // each style's choices (value, label), and what it starts at: glow is a slow 3 s loop at 24 fps on a
 // fine grid, streak a fast 1 s boil on a coarse one, dust a 2 s drift on a fine one
-type FxSet = { long: number, frames: number, scale: number, angle: number, colour: string, flat?: boolean };
+type FxSet = { long: number, frames: number, scale: number, angle: number | null, colour: string, flat?: boolean };
 const FX: Record<Style, { long: number[], len: [number, string][], scale: number[], fps: number, d: FxSet }> = {
   glow: { long: [360, 540, 720], len: [[48, '2 s'], [72, '3 s'], [96, '4 s']], scale: [1, 2], fps: 24,
     d: { long: 540, frames: 72, scale: 2, angle: 0, colour: '' } },
   streak: { long: [180, 270, 360], len: [[12, '½ s'], [24, '1 s'], [48, '2 s']], scale: [2, 4], fps: 24,
     d: { long: 270, frames: 24, scale: 4, angle: 0, colour: 'red' } },
   dust: { long: [360, 540, 720], len: [[24, '1 s'], [48, '2 s'], [72, '3 s']], scale: [1, 2], fps: 24,
-    d: { long: 540, frames: 48, scale: 2, angle: 0, colour: 'white', flat: false } },
+    d: { long: 540, frames: 48, scale: 2, angle: null, colour: 'white', flat: false } },
 };
-const FX_ANGLES: [number, string, string][] = [[0, '↔', 'Across'], [90, '↕', 'Up and down'], [45, '⤡', 'Diagonal, falling'], [315, '⤢', 'Diagonal, rising']];
+// which way the dust drifts: a dial (degrees, 0 right, 90 down); auto drifts across, away from the lit side
 const fxSets: Record<Style, FxSet> = { glow: { ...FX.glow.d }, streak: { ...FX.streak.d }, dust: { ...FX.dust.d } };
 const fxs = { mode: 'live' as Mode, url: '', seq: 0, w: 0, h: 0 };
 const fxSet = (): FxSet => fxSets[fxs.mode === 'live' ? 'glow' : fxs.mode];
@@ -691,7 +691,7 @@ function fxButtons(): void {
   $('fx-long').innerHTML = o.long.map(v => b(v, String(v), v === c.long)).join('');
   $('fx-len').innerHTML = o.len.map(([v, l]) => b(v, l, v === c.frames)).join('');
   $('fx-scale').innerHTML = o.scale.map(v => b(v, v + '×', v === c.scale)).join('');
-  $('fx-angle').innerHTML = FX_ANGLES.map(([v, l, t]) => b(v, l, v === c.angle, t)).join('');
+  dial(c.angle);
   setSeg('fx-colours', c.colour);
   setSeg('fx-tone', c.flat ? '1' : '0');
 }
@@ -702,7 +702,39 @@ seg('fx-colours', v => { fxSet().colour = v; renderFx(0); });
 seg('fx-long', v => { fxSet().long = Number(v); renderFx(0); });
 seg('fx-len', v => { fxSet().frames = Number(v); renderFx(0); });
 seg('fx-scale', v => { fxSet().scale = Number(v); });
-seg('fx-angle', v => { fxSet().angle = Number(v); renderFx(0); });
+seg('fx-angle', () => { fxSet().angle = null; dial(null); renderFx(0); });
+// the dial: its hand points the way the dust goes; drag or click round it, or use the arrow keys
+function dial(deg: number | null): void {
+  const d = $('fx-dial'), r = ((deg ?? 0) * Math.PI) / 180;
+  const hand = d.querySelector('line')!, knob = d.querySelector('circle.knob')!;
+  hand.setAttribute('x2', String(12 + 8 * Math.cos(r))); hand.setAttribute('y2', String(12 + 8 * Math.sin(r)));
+  knob.setAttribute('cx', String(12 + 8 * Math.cos(r))); knob.setAttribute('cy', String(12 + 8 * Math.sin(r)));
+  d.classList.toggle('auto', deg === null);
+  d.setAttribute('aria-valuenow', String(deg ?? 0));
+  d.setAttribute('aria-valuetext', deg === null ? 'auto' : `${Math.round(deg)}°`);
+  d.title = deg === null ? 'Drift direction: auto. Drag round the dial to set it' : `Drift direction: ${Math.round(deg)}°`;
+  pressed($('fx-angle').querySelector('button[data-v=auto]')!, deg === null);
+}
+function dialAt(e: PointerEvent): number {
+  const b = $('fx-dial').getBoundingClientRect();
+  const deg = (Math.atan2(e.clientY - (b.top + b.height / 2), e.clientX - (b.left + b.width / 2)) * 180) / Math.PI;
+  return ((Math.round(deg / 5) * 5) % 360 + 360) % 360;   // to the nearest 5°
+}
+function dialSet(deg: number): void { fxSet().angle = deg; dial(deg); renderFx(0); }
+{
+  const d = $('fx-dial');
+  let drag = false;
+  d.addEventListener('pointerdown', e => { drag = true; d.setPointerCapture(e.pointerId); dial(dialAt(e)); e.preventDefault(); });
+  d.addEventListener('pointermove', e => { if (drag) dial(dialAt(e)); });   // only the hand moves while dragging
+  d.addEventListener('pointerup', e => { if (!drag) return; drag = false; dialSet(dialAt(e)); });
+  d.addEventListener('pointercancel', () => { drag = false; dial(fxSet().angle); });
+  d.addEventListener('keydown', e => {
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 15 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -15 : 0;
+    if (!step) return;
+    e.preventDefault();
+    dialSet((((fxSet().angle ?? 0) + step) % 360 + 360) % 360);
+  });
+}
 seg('fx-tone', v => { fxSet().flat = v === '1'; renderFx(0); });
 seg('mode', v => setMode(v as Mode));
 
@@ -714,7 +746,7 @@ function setMode(m: Mode): void {
   $('live-bar').classList.toggle('off', !live || !st.map);
   $('fx-bar').classList.toggle('off', live || !st.map);
   $('fx-colours').hidden = m === 'live' || m === 'glow';
-  $('fx-angle').hidden = m !== 'glow' && m !== 'dust';
+  $('fx-angle').hidden = m !== 'dust';   // glow's streams are drips: they fall straight down
   $('fx-tone').hidden = m !== 'dust';
   fxButtons();
   $('fx-img').hidden = live || !fxs.url;
@@ -732,7 +764,7 @@ function setMode(m: Mode): void {
 
 function fxBody(format: string, scale: number, save: boolean): object {
   const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
-  return { ...params(), style: fxs.mode, long: fxSet().long, frames: fxSet().frames, angle: fxs.mode === 'streak' ? undefined : fxSet().angle,
+  return { ...params(), style: fxs.mode, long: fxSet().long, frames: fxSet().frames, angle: fxs.mode === 'dust' ? fxSet().angle ?? undefined : undefined,
     colour: fxSet().colour || undefined, flat: fxs.mode === 'dust' ? fxSet().flat : undefined, format, scale, name,
     save: save && !server.public && $<HTMLInputElement>('save').checked };
 }

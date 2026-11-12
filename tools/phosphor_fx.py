@@ -1408,6 +1408,8 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
         P.colour = colour if colour.startswith('#') else COLOURS.get(colour, P.colour)
     if angle is not None and isinstance(P, (Glow, Dust)):
         P.angle = angle
+        if isinstance(P, Dust):   # a direction asked for is kept: no turning round to spare the lit side
+            P.spare_lit = False
     return P
 
 
