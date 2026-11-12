@@ -190,6 +190,7 @@ class Glow:
     solid: float = 0.2          # share of the figure lit near solid (picks the curve per picture; 0: use gamma)
     gamma: float = 3.0          # tone curve (higher: the shade empties out more)
     fill: float = 0.65          # the densest the dots get outside the brightest light
+    core_fade: float = 8.0      # dots over which the hot core's orange fades to green at its edge
     grain: float = 0.2          # share of the hot core's dots turned white (and half that magenta)
     halo: float = 0.1           # sparse dots over the mid-tones, so the shade fades out
     hot_fill: float = 0.9       # how solid the hot core is
@@ -211,7 +212,7 @@ class Glow:
     rim_lines: int = 3          # parallel lines along a rim, a dot wide, a dot of black between
     rim_level: float = 0.985    # which edges get one (percentile of edge strength; the outline always)
     line_level: float = 0.99    # which edges count as contours (percentile of edge strength)
-    ramp: tuple = (0.0, 0.3, 0.8, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
+    ramp: tuple = (0.0, 0.3, 0.7, 0.95, 0.99)   # rank among lit dots where blue, blue 2, green, orange, white sit
     floor: float = 0.05         # the least light in the figure: its shade never quite goes black
     fringe: float = 0.8         # magenta on the dark side of bright edges
     warmth: float = 0.15        # how far the picture's own warm light leans to orange
@@ -327,6 +328,8 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         col[(hot > 0.6) & (col == WHITE) & ~lat & ~((hot > 0.85) & (gr < 0.1))] = ORANGE   # white mostly on the lattice
         col[core_o & (hot > 0.85) & (col == GREEN)] = ORANGE   # green a ring round the core, never under its white
         col[core_o & lat & (col == ORANGE) & (rng.random((H, W)) < np.minimum(P.grain * 4.5 * hot, 0.6))] = WHITE   # on orange only, even through the core
+        din = cv2.distanceTransform((hot > 0.5).astype(np.uint8), cv2.DIST_L2, 3)   # the core's edge, wide: orange fades through green
+        col[(col == ORANGE) & (rng.random((H, W)) < 0.85 * np.clip(1 - din / P.core_fade, 0, 1))] = GREEN
         gb = rng.random((H, W))
         col[(hot > 0.6) & (col == ORANGE) & (gb < 0.03)] = BLUE2      # the grid broken by a few stray dots
         col[(hot > 0.6) & (col == ORANGE) & (gb > 0.98)] = MAGENTA
