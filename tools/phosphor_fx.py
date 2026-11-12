@@ -512,6 +512,7 @@ class Streak:
     colour: str = '#ee1111'
     gain: float = 1.0           # more or less light
     gamma: float = 1.7          # tone curve: above 1, darker mid-tones and more contrast
+    local: float = 0.5          # local contrast before the dither (light against its surroundings, 8 dots)
     most: float = 0.86          # the densest the dots get: near solid in the highlights, a pinhole in seven
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
@@ -576,6 +577,8 @@ def streak(A: dict, P: Streak | None = None, seed: int = 1) -> Frames:
     c = np.float32(hex_rgb(P.colour))
     pal = np.array([[0, 0, 0], c * 0.62, c * 0.8, c], np.uint8)       # three shades of the one colour
     tt = np.clip(P.gain * np.clip((t - P.black) / (1 - P.black), 0, 1) ** P.gamma, 0, 1)
+    if P.local > 0:   # local contrast: tone pulls apart into lit planes and shade, not one flat mid band
+        tt = np.clip(tt + P.local * (tt - cv2.GaussianBlur(tt, (0, 0), 8)), 0, 1)
     if (a > 0.5).any():   # the brightest of the figure at full light, whatever the picture
         tt = np.clip(tt / max(np.percentile(tt[a > 0.5], 99), 0.3), 0, 1)
     if P.peak > 0 and (a > 0.5).any():   # the brightest light near solid, as on a hat brim or a lit cheek
@@ -702,6 +705,7 @@ class Dust:
     most: float = 0.55          # the densest the specks get, in the brightest light
     clump: float = 1.0          # how much the specks clump (0: even white noise): grains, not a sieve
     clump_size: float = 0.5     # the blur that clumps them (dots): finer keeps small features
+    lone: float = 0.7           # share of specks touching no other that go
     outline: float = 0.6        # how much of the silhouette and strongest edges is drawn as bright strokes
     dust_floor: float = 0.1     # the least density in the intact figure (a cut-out only): its shade doesn't go black
     pair: float = 0.6           # share of lone body specks given a neighbour along the shapes
@@ -891,6 +895,9 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             lit[ly, lx] = False   # moved, not added: the same light
             lit[ty_, tx_] = True
             lev[ty_, tx_] = lev[ly, lx]
+        if P.lone > 0:   # a speck on its own, touching none: mostly gone, so the body is grains, not a sieve
+            alone = lit & (cv2.filter2D(lit.astype(np.uint8), -1, k8, borderType=cv2.BORDER_CONSTANT) == 0) & (rng.random((H, W)) < P.lone)
+            lit &= ~alone
         img = np.where(lit, lev, 0).astype(np.uint8)
         # flecks along the shapes, mostly in the lit and on edges
         wf = (A['edge'] * A['coh'] * tt + 0.3 * tt) * dens
