@@ -975,14 +975,22 @@ class Dust:
     scale: int = 2
     colour: str = '#f2f2f2'
     gain: float = 1.0           # more or less light
-    gamma: float = 2.8          # tone curve: the mid-tones thin out, so the features read
+    gamma: float = 1.6          # tone curve: lower keeps the mid-tones, so the form reads as in the references
     black: float = 0.12         # light below this is black
-    most: float = 0.55          # the densest the specks get, in the brightest light
+    most: float = 0.75          # the densest the specks get, in the brightest light
+    core: float = 0.5           # extra density in the brightest light (on tt^4): hot cores, near solid, as the references' lit faces
+    break_flecks: int = 2500    # where the figure comes apart, its light as streaks along the drift (count for 540x540): solid, then streaks, then motes
+    break_len: tuple[int, int] = (3, 7)
+    beads: int = 0            # larger round bright dots over the grain, in the light (count for 540x540): a few big marks among many fine
+    tiles: float = 0.0          # share of the lit body's light carried by small solid tiles (2x2, 3x3 in the brightest), each one grey, black round it
+    tile_from: float = 0.3      # the light (tt) where tiles start, full by tile_from + 0.5
+    core_most: float = 0.95     # the densest anything gets (was 0.7)
     clump: float = 1.0          # how much the specks clump (0: even white noise): grains, not a sieve
     clump_size: float = 0.5     # the blur that clumps them (dots): finer keeps small features
     grain_wide: float = 1.0     # how much wider than tall the grains are (1: round)
     lone: float = 1.0           # share of specks touching no other at their sides that go
     unplus: float = 1.0         # share of '+'-shaped grains given a corner, so they read as blocks
+    near_rim: float = 0.0       # more of the silhouette drawn on the side that holds (away from the dissolve): crisp there, blown out on the far side
     outline: float = 0.3        # how much of the silhouette and strongest edges is drawn as bright strokes
     dust_floor: float = 0.1     # the least density in the intact figure (a cut-out only): its shade doesn't go black
     pair: float = 0.6           # share of lone body specks given a neighbour along the shapes
@@ -1003,7 +1011,7 @@ class Dust:
     spare_lit: bool = True      # drift the other way if the far side holds the most light
     side: float = 0.7           # how much of the figure, from its far side along the angle, dissolves
     motes: int = 2500           # particles drifting off it
-    reach: int = 220            # how far they go in a loop, in dots
+    reach: int = 150            # how far they go in a loop, in dots
     trail: int = 16             # motes to a trail, following one another
     curl: float = 0.1           # how much they follow the shapes they come from, not the angle
     blobs: int = 60             # soft grey blots among them
@@ -1017,14 +1025,16 @@ class Dust:
     flat: bool = False          # one flat grey for everything (no shades, no haze), as some dust art is
     checker: float = 0.25       # flat only: share of the mid-tone body drawn as patches of checkerboard dither
     checker_from: float = 0.2   # the local speck density where mid tones start (share of dots lit, 9x9)
-    mote_len: tuple[int, int] = (2, 14)  # dots in a mote, least and most: a short dash along its way
-    mote_tail: float = 0.45     # how quickly long motes get rare (geometric: lower, more long ones)
-    falloff: float = 1.5        # how fast motes thin out as they go
-    swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
+    mote_len: tuple[int, int] = (3, 14)  # dots in a mote, least and most: a short dash along its way
+    mote_tail: float = 0.3     # how quickly long motes get rare (geometric: lower, more long ones)
+    accel: float = 1.8          # motes move as u**accel round the loop (above 1: slow off the figure, then faster)
+    throw: float = 0.03         # share of trails thrown 1.5-2.5x as far
+    falloff: float = 2.5        # how fast motes thin out as they go
+    swirl: float = 12.0         # how far the drift turns region by region (degrees, typical)
     thick: float = 0.2          # share of motes two dots thick
     lanes: float = 0.7          # how much the motes gather in lanes along the drift (0: evenly)
     jitter_size: float = 15.0   # how wide the regions are that stray together (dots)
-    jitter: float = 11.0        # how far each mote's heading strays from its lane's (degrees, typical)
+    jitter: float = 6.0        # how far each mote's heading strays from its lane's (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
     comb: float = 0.2           # how far the flecks lie along the drift, not the shapes, inside the figure
 
@@ -1082,10 +1092,17 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     sil = cv2.GaussianBlur(np.hypot(cv2.Sobel(a, cv2.CV_32F, 1, 0), cv2.Sobel(a, cv2.CV_32F, 0, 1)), (0, 0), 0.7)
     sil = np.clip(sil / (sil.max() + 1e-6) * 3, 0, 1) * (a > 0.3)
     sil[:3], sil[-3:], sil[:, :3], sil[:, -3:] = 0, 0, 0, 0   # the frame's edge is no outline
-    if (a > 0.5).mean() > 0.97:   # nothing cut out: no silhouette to draw
+    m_ = a > 0.5
+    if m_.any():   # a whole picture framed smaller (its alpha a plain rectangle) is not cut out either
+        ys_, xs_ = np.nonzero(m_)
+        boxed = m_.sum() / ((ys_.max() - ys_.min() + 1) * (xs_.max() - xs_.min() + 1)) > 0.97
+    else:
+        boxed = False
+    cut = (not boxed) and m_.mean() < 0.97
+    if not cut:   # nothing cut out: no silhouette to draw
         sil[:] = 0
-    dens = (np.clip(tt * P.most + P.edges * (0.7 * sil + 0.4 * ed ** 1.5 * (0.25 + 0.75 * tt)), 0, 0.7) * (1 - P.dissolve * sw)).astype(np.float32)
-    if P.dust_floor > 0 and 0.02 < (a > 0.5).mean() < 0.97:   # the shade of the intact figure keeps a sparse grain
+    dens = (np.clip(tt * P.most + P.core * tt ** 4 + P.edges * (0.7 * sil + 0.4 * ed ** 1.5 * (0.25 + 0.75 * tt)), 0, P.core_most) * (1 - P.dissolve * sw)).astype(np.float32)
+    if P.dust_floor > 0 and cut and 0.02 < (a > 0.5).mean():   # the shade of the intact figure keeps a sparse grain
         fz = (dens < P.dust_floor) & (a > 0.5) & (sw < 0.2)   # where the floor holds: its specks stay, lone or not
         dens = np.maximum(dens, P.dust_floor * (a > 0.5) * np.clip(1 - 3 * sw, 0, 1)).astype(np.float32)
     else:
@@ -1096,6 +1113,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     ck = (np.add.outer(np.arange(H), np.arange(W)) % 2 == 0)
     k8 = np.ones((3, 3), np.float32); k8[1, 1] = 0
     strong_ed = (ed > np.percentile(ed[a > 0.5], 97)) & (sw < 0.5) if (a > 0.5).any() else np.zeros_like(a, bool)
+    if not cut:   # nor the edge of the picture's own frame
+        strong_ed &= cv2.erode(m_.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool)
     rim = ((sil > 0.5) | strong_ed) & (a > 0.3)   # the outline holds even where the figure comes apart
 
     def flat_noise():
@@ -1134,7 +1153,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         c, s_ = np.cos(ang)[:, None], np.sin(ang)[:, None]
         sv = np.concatenate([sv[:, :1] * c - sv[:, 1:] * s_, sv[:, :1] * s_ + sv[:, 1:] * c], 1)
     sv /= np.linalg.norm(sv, axis=1, keepdims=True) + 1e-6
-    sfar = (P.reach * math.sqrt(many) * rng.uniform(0.4, 1, k) * np.where(rng.random(k) < 0.15, rng.uniform(1.5, 2.5, k), 1) * (0.4 + 0.6 * sw[iy, ix])).astype(np.float32)
+    sfar = (P.reach * math.sqrt(many) * rng.uniform(0.4, 1, k) * np.where(rng.random(k) < P.throw, rng.uniform(1.5, 2.5, k), 1) * (0.4 + 0.6 * sw[iy, ix])).astype(np.float32)
     sbend = rng.normal(0, P.bend, k).astype(np.float32)     # a slow drift sideways too: the lanes curve
     who = rng.integers(0, k, nm) if len(src) else np.zeros(0, int)
     n = len(who)
@@ -1178,6 +1197,11 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         gpos = np.zeros((0, 2), np.float32); gph = garm = glev = np.zeros(0)
     inner = cv2.erode((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & (sw < 0.3)
     off_near = cv2.dilate((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    nearw = (np.clip(1 - pn / 0.6, 0, 1) * (sil > 0.5)).astype(np.float32)   # the near side of the outline, fading by 60% across
+    bd = seed_where((np.sqrt(tt) * np.clip(0.6 - dens, 0, 1) * (dens > 0.08) * (a > 0.5) * np.clip(1 - 2 * sw, 0, 1)).astype(np.float32), int(P.beads * many), rng) if P.beads > 0 else np.zeros((0, 2), np.float32)
+    bd = np.round(bd).astype(int) if len(bd) else np.zeros((0, 2), int)
+    bph = rng.random(len(bd)); bbig = rng.random(len(bd)) < 0.35
+    bz = (P.tiles * np.clip((tt - P.tile_from) / 0.5, 0, 1) * (a > 0.5) * np.clip(1 - 2 * sw, 0, 1)).astype(np.float32) if P.tiles > 0 else None
     out = np.zeros((P.frames, H, W), np.uint8)
     for f in range(P.frames):
         s = f / P.frames
@@ -1189,7 +1213,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             lev = np.where(top_lit, lev, np.minimum(lev, NL - 1))   # white only in the very brightest
         if P.outline > 0:   # the silhouette and strongest edges as bright strokes; stray dim specks go
             lit &= ~((lev <= 3) & (cv2.filter2D(lit.astype(np.uint8), -1, k8, borderType=cv2.BORDER_CONSTANT) == 0) & ~fz)
-            stroke = rim & (rng.random((H, W)) < P.outline * (1 - 0.8 * sw))   # thinning where the figure comes apart
+            stroke = rim & (rng.random((H, W)) < (P.outline + P.near_rim * nearw) * (1 - 0.8 * sw))   # thinning where the figure comes apart
             lit |= stroke
             lev = np.where(stroke, np.where(top_lit, NL, NL - 1), lev)
         if P.pair > 0:   # lone body specks move next to a neighbour along the shapes: short dashes, not a checker mesh
@@ -1213,6 +1237,25 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             lit = np.where(cz, ck, lit)
             lev = np.where(cz, NL, lev)
         img = np.where(lit, lev, 0).astype(np.uint8)
+        tl = []
+        if bz is not None:   # part of the light as small solid tiles, each one grey with black round it: marks, not grain
+            lit_k = rng.random((H, W)) >= bz
+            img[~lit_k & ~rim] = 0
+            ty0, tx0 = np.nonzero(rng.random((H, W)) < bz * dens / 4.5)
+            if len(ty0):
+                sz = np.where(tt[ty0, tx0] > 0.75, np.where(rng.random(len(ty0)) < 0.4, 3, 2), 2)
+                for z in (2, 3):   # a black ring round each, then the tile
+                    m = sz == z
+                    for oy in range(-1, z + 1):
+                        for ox in range(-1, z + 1):
+                            img[np.clip(ty0[m] + oy, 0, H - 1), np.clip(tx0[m] + ox, 0, W - 1)] = 0
+                tlev = np.clip(lev[ty0, tx0] + 1, 1, NL).astype(np.uint8)
+                for z in (2, 3):
+                    m = sz == z
+                    for oy in range(z):
+                        for ox in range(z):
+                            img[np.clip(ty0[m] + oy, 0, H - 1), np.clip(tx0[m] + ox, 0, W - 1)] = tlev[m]
+                tl = (ty0, tx0, sz)
         # flecks along the shapes, mostly in the lit and on edges
         wf = (A['edge'] * A['coh'] * tt + 0.3 * tt) * dens
         fs = seed_where(wf.astype(np.float32), int(P.flecks * many), rng)
@@ -1236,11 +1279,30 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
                     st = on & jn & (np.abs(pt - prev).sum(1) > 1.5)
                     plot(img, np.stack([pt[:, 0], prev[:, 1]], 1)[st], fl[st])
                 prev = pt
+        if P.break_flecks > 0 and cut:   # (a cut-out only: on a whole picture the far side is just its frame) where it comes apart: streaks along the drift, brighter where the light was
+            bw = (tt ** 0.7 + 0.15 * (a > 0.2) * cut) * np.clip((sw - 0.35) / 0.3, 0, 1) * np.clip((1 - sw) * 3, 0, 1) * (a > 0.2) * np.where(top_lit & (sw < 0.7), 0.15, 1)   # from the trailing part only, and mostly off the brightest light (a face)
+            bs = seed_where(bw.astype(np.float32), int(P.break_flecks * many), rng)
+            if len(bs):
+                bx, by = bs[:, 0].astype(int), bs[:, 1].astype(int)
+                an = rng.normal(0, math.radians(8), len(bs))
+                bv = np.stack([dv[0] * np.cos(an) - dv[1] * np.sin(an), dv[0] * np.sin(an) + dv[1] * np.cos(an)], 1).astype(np.float32)
+                bl = rng.integers(P.break_len[0], P.break_len[1] + 1, len(bs))
+                blv = np.clip(np.round(2 + (NL - 2) * np.sqrt(tt[by, bx]) + rng.normal(0, 0.7, len(bs))), 2, NL - 1).astype(np.uint8)
+                prev = None
+                for j in range(P.break_len[1]):
+                    on = j < bl
+                    pt = np.round(bs + bv * j)
+                    plot(img, pt[on], np.where(j == bl[on] - 1, np.maximum(blv[on].astype(int) - 1, 1), blv[on]).astype(np.uint8))   # the tail a step dimmer
+                    if prev is not None:
+                        st = on & (np.abs(pt - prev).sum(1) > 1.5)
+                        plot(img, np.stack([pt[:, 0], prev[:, 1]], 1)[st], blv[st])
+                    prev = pt
         # the motes
         u = np.mod(mph + s, 1)
-        pos = m0 + mv * (far * u)[:, None] + perp * (bend * far * u * u + 3 * np.sin(wob + 6.283 * u) - 3 * np.sin(wob))[:, None]
+        ua = u ** P.accel   # they start slow and pick up speed: crowded near the figure, thinning as they go
+        pos = m0 + mv * (far * ua)[:, None] + perp * (bend * far * ua * ua + 3 * np.sin(wob + 6.283 * u) - 3 * np.sin(wob))[:, None]
         fade = np.minimum(1, u * 8) * (1 - u) ** P.falloff   # thickest as they leave, thinning out as they go
-        vel = mv * far[:, None] + perp * (2 * bend * far * u + 6 * np.pi * np.cos(wob + 6.283 * u))[:, None]
+        vel = mv * far[:, None] + perp * (2 * bend * far * ua + 6 * np.pi * np.cos(wob + 6.283 * u))[:, None]
         vel /= np.linalg.norm(vel, axis=1, keepdims=True) + 1e-6   # each dash along the way it is going
         vis = rng.random(n) < fade ** 0.7                 # they fade by thinning out, each one staying crisp
         pi_ = np.clip(np.round(pos).astype(int), 0, [W - 1, H - 1])
@@ -1266,6 +1328,21 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             lvv = np.minimum(blev[bi], ml[bi, None]).reshape(-1)
             ok = ~np.isnan(pts[:, 0])
             plot(img, pts[ok], lvv[ok])
+        if len(bd):   # beads: each lit for part of the loop, a 2x2 core (a rounded 4x4 for some) with black round it
+            on = np.mod(s - bph, 1) < 0.6
+            for big_ in (False, True):
+                m = on & (bbig == big_)
+                cx_, cy_ = bd[m, 0], bd[m, 1]
+                r0, r1 = (0, 2) if not big_ else (-1, 3)   # a black ring only round the big ones' rounded 4x4
+                for oy in range(r0 - big_, r1 + big_):
+                    for ox in range(r0 - big_, r1 + big_):
+                        img[np.clip(cy_ + oy, 0, H - 1), np.clip(cx_ + ox, 0, W - 1)] = 0
+                cells = [(ox, oy) for oy in range(2) for ox in range(2)]
+                if big_:
+                    cells = [(ox, oy) for oy in range(-1, 3) for ox in range(-1, 3) if not (ox in (-1, 2) and oy in (-1, 2))]
+                for ox, oy in cells:
+                    edge_ = big_ and (ox in (-1, 2) or oy in (-1, 2))
+                    img[np.clip(cy_ + oy, 0, H - 1), np.clip(cx_ + ox, 0, W - 1)] = NL - 1 if edge_ else NL
         # sparkles: a few four-point glints on the brightest light, each lit for part of the loop
         for (sx, sy), sp, sl in zip(spk, sph, sln):
             ph_ = np.mod(s - sp, 1)
@@ -1309,6 +1386,16 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
             g = lv[img[sp]] + gshake[sp]
             g = np.clip(np.where(g < FINE_LO, 2 * FINE_LO - g, g) if P.fine_reflect else g, FINE_LO, 1.0)   # those shaken under the ramp bounce back: no pile at its foot
             img[sp] = (NL + 3 + np.round((g - FINE_LO) / (1 - FINE_LO) * (FINE - 1))).astype(np.uint8)
+            if len(tl):   # each tile one grey: its first dot's
+                ty0, tx0, sz = tl
+                for z in (2, 3):
+                    m = sz == z
+                    v0 = img[ty0[m], tx0[m]]
+                    for oy in range(z):
+                        for ox in range(z):
+                            yy_, xx_ = np.clip(ty0[m] + oy, 0, H - 1), np.clip(tx0[m] + ox, 0, W - 1)
+                            keep_ = img[yy_, xx_] > 0
+                            img[yy_[keep_], xx_[keep_]] = v0[keep_]
         if P.glow > 0 and not P.flat:   # the specks glow a little into the black round them, brighter round brighter ones
             v = pal[img].max(-1).astype(np.float32) / cmax
             b = cv2.GaussianBlur(v, (0, 0), P.glow_size) * P.glow
