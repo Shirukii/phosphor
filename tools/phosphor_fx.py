@@ -770,7 +770,9 @@ class Dust:
     dust_floor: float = 0.1     # the least density in the intact figure (a cut-out only): its shade doesn't go black
     pair: float = 0.6           # share of lone body specks given a neighbour along the shapes
     shade_lev: float = 0.6      # how far each speck's grey follows the light (0: any grey)
-    grey_spread: float = 0.14   # how far each speck's grey strays from its step (0: a few flat steps)
+    grey_spread: float = 0.15   # how far each speck's grey strays from its step (0: a few flat steps)
+    grey_patch: float = 0.16    # how far greys shift patch by patch (0: no patches)
+    grey_patch_size: float = 12.0  # how wide the grey patches are (dots of blur)
     order: float = 0.15         # how much of the body is an ordered (Bayer) dither, not noise: a little keeps features crisp
     edges: float = 0.35         # specks gathering on the outline (and less, the edges inside)
     flecks: int = 5000          # short flecks, placed afresh each frame (counts are for 540x540)
@@ -820,6 +822,9 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     if FINE:   # a fine ramp of greys past the steps (and the haze), that each speck's grey is shaken onto
         pal = np.concatenate([pal, (np.linspace(FINE_LO, 1.0, FINE)[:, None] * c[None]).astype(np.uint8)])
         gshake = (rng.normal(0, P.grey_spread, (H, W))).astype(np.float32)   # fixed: a still speck keeps its grey
+        if P.grey_patch > 0:   # and patches of lighter and darker grey, a few dots across, under the speckle
+            gp = cv2.GaussianBlur(rng.standard_normal((H, W)).astype(np.float32), (0, 0), P.grey_patch_size)
+            gshake += P.grey_patch * gp / (gp.std() + 1e-6)
     tt = np.clip(P.gain * np.clip((t - P.black) / (1 - P.black), 0, 1) ** P.gamma, 0, 1).astype(np.float32)
     if (a > 0.5).any():   # the figure's brightest at full light, whatever the picture
         tt = np.clip(tt / max(float(np.percentile(tt[a > 0.5], 98)), 0.2), 0, 1).astype(np.float32)
