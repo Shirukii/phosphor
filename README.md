@@ -73,18 +73,18 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
 
 `tools/phosphor_fx.py` draws a picture as a loop of dots on black, in one of three styles:
 
-- **glow:** eight colours, dithered on a fine grid: sparse blue dots in the shade fading to dim navy, green,
-  orange and white in zones where the light gathers, contours in salmon, orange, blue and pink, pink
-  on the dark side of edges, and a rim of thin parallel lines round the figure. The shape holds
-  still; light and sparks run through it in slanted streaks, and bundles of lines grow out of its
-  outline and draw back, along one line (`--angle`: 0 across, 90 up and down). 3 s at 24 fps.
+- **glow:** eight colours, dithered on a fine grid: sparse blue dots in the shade, building through
+  green and pink to orange and white where the light gathers, contours and thin rim lines along the
+  lit edges, a few lone specks round the figure, and dotted drips falling from its lower edges. A
+  light source in the picture (a flame, a lamp) becomes a white-orange core with a halo through
+  green into blue. 3 s at 24 fps.
 - **streak:** one colour (red by default) on a coarse grid, error-diffused afresh each frame so the
   figure boils, short dashes along its shapes (and drawing the texture of its shaded parts, where
   the dither leaves black), clean black round it but for loose specks gathering towards the bottom, and slanted rain
   flashing up in new places every frame. 1 s at 24 fps.
 - **dust:** grey specks gathered in small grains, each its own shade, brighter where the light is, with a faint haze round them, the outline and the
   strongest edges drawn as bright strokes, with short flecks along the shapes and a few glints;
-  from its darker side (along `--angle`) the figure comes apart in curving lanes of dashes that
+  from its darker side (or along `--angle`, kept as given) the figure comes apart in curving lanes of dashes that
   drift off and fade. 2 s at 24 fps.
 
 ```bash
@@ -95,9 +95,14 @@ writes `out/picture/fx/glow.gif`, `glow.webp`, `glow/0000.png`… and the same f
 picture with transparency is taken as cut out already; `--cutout` cuts any other one out, and
 without either the whole picture is used. `--style`, `--long` (dots across the longer side: glow
 540, streak 270, dust 540), `--aspect` (`WxH`, default `1x1`), `--scale` (px per dot in the files:
-glow 2, streak 4, dust 2), `--frames`, `--fps`, `--angle` (glow, dust), `--colour` (streak, dust), `--flat` (dust: one flat grey, no shades or haze, mid-tones in patches of checkerboard),
+glow 2, streak 4, dust 2), `--frames`, `--fps`, `--angle` (dust), `--colour` (streak, dust), `--flat` (dust: one flat grey, no shades or haze, mid-tones in patches of checkerboard),
 `--seed` (by default one from the picture, so the same picture always comes out the same). All three
 work best on detailed, lit pictures: the edges and the light are what they draw.
+
+In the web page each style also has hand controls, since no one setting suits every picture: Light
+(exposure), Highlights (how big and dense the brightest light gets), and for glow Warmth (how much
+of the light turns warm) and Focus (click the picture: the light gathers there). Dust's drift is set
+on a dial, or left on Auto.
 
 The server keeps pictures in memory while it runs, and only listens on localhost. It has no
 dependencies past the three above (`--port`, `--host` to change where it listens).

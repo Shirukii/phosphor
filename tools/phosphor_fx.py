@@ -253,6 +253,7 @@ class Glow:
     emit_halo: float = 12.0     # and the halo's reach (dots)
     warm_abs: float = 0.2       # this warm (red over blue) or more is never green
     peak_white: float = 0.0    # share of the very top of the light turned white
+    focus_xy: tuple | None = None   # a point the light gathers on (x, y, 0..1 of the frame), set by hand
     focus_dim: float = 0.0      # how far light away from the picture's focus (flame, lit skin) is dimmed
     soft_cap: bool = True       # the density cap rises smoothly into the highlights
     cap_from: float = 0.75      # rank of the light where it starts to rise
@@ -335,7 +336,13 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     a = A['alpha']
     t = (1 - P.even) * A['plain'] + P.even * A['tone']    # some of the evened-out light: dark pictures keep their shapes
     H, W = t.shape
-    if P.focus_dim > 0:   # the light gathers on the picture's focus (a flame, the lit skin): other bright things can't outshine it
+    if P.focus_xy is not None:   # a focus set by hand: the light gathers round that point, the rest dims
+        H_, W_ = t.shape
+        yy, xx = np.mgrid[0:H_, 0:W_].astype(np.float32)
+        sd = 0.22 * max(H_, W_)
+        fm = np.exp(-((xx - P.focus_xy[0] * W_) ** 2 + (yy - P.focus_xy[1] * H_) ** 2) / (2 * sd * sd))
+        t = (t * (1 - max(P.focus_dim, 0.6) * (1 - fm))).astype(np.float32)
+    elif P.focus_dim > 0:   # the light gathers on the picture's focus (a flame, the lit skin): other bright things can't outshine it
         fmap = focus_map(A, t)
         if fmap is not None:
             t = (t * (1 - P.focus_dim * (1 - fmap))).astype(np.float32)
@@ -1484,6 +1491,34 @@ COLOURS = {'red': '#ee1111', 'white': '#f2f2f2', 'grey': '#d8d8d8', 'green': '#4
            'rose': '#f07aa6'}
 
 
+TUNE = {'exposure': (0.3, 3.0), 'highlights': (0.0, 3.0), 'warmth': (0.0, 3.0)}   # the hand controls, and their ranges
+
+
+def tune(P, t: dict | None):
+    """Hand controls on top of a style's settings, each 1 (or absent) for no change: exposure (more or
+    less light), highlights (how big and dense the brightest light gets), warmth (glow: how much of
+    the light turns warm), focus ((x, y), 0..1 of the frame: glow's light gathers there)."""
+    t = t or {}
+    e, h, w = (float(t.get(k, 1.0)) for k in ('exposure', 'highlights', 'warmth'))
+    P.gain *= e
+    if isinstance(P, Glow):
+        P.lit_mass, P.lit_floor, P.core_halo = P.lit_mass * h, P.lit_floor * h, P.core_halo * h
+        P.hot = P.hot * h
+        P.skin_share *= w
+        P.warmth *= w
+        r = list(P.ramp)   # more or less of the light reaches orange and white
+        r[3] = min(0.995, 1 - (1 - r[3]) * w)
+        r[4] = min(0.999, max(r[3] + 0.002, 1 - (1 - r[4]) * w))
+        P.ramp = tuple(r)
+        if t.get('focus') is not None:
+            P.focus_xy = (float(t['focus'][0]), float(t['focus'][1]))
+    elif isinstance(P, Dust):
+        P.core *= h
+    elif isinstance(P, Streak):
+        P.most = min(1.0, P.most * (0.5 + 0.5 * h))
+    return P
+
+
 def params(style: str, frames: int | None = None, colour: str | None = None, angle: float | None = None,
            flat: bool = False):
     """A style's settings, with the given ones changed."""
@@ -1506,12 +1541,12 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
 
 
 def render(rgba: np.ndarray, style: str, frames: int | None = None, colour: str | None = None,
-           angle: float | None = None, seed: int | None = None, flat: bool = False) -> Frames:
+           angle: float | None = None, seed: int | None = None, flat: bool = False, hand: dict | None = None) -> Frames:
     """A framed picture (RGBA at the output size) as a clip in a style. Without a seed, one from
     the picture: the same picture comes out the same, and no two pictures share their rain."""
     if seed is None:
         seed = zlib.crc32(np.ascontiguousarray(rgba[::7, ::7]).tobytes())
-    return STYLES[style][0](analyse(rgba), params(style, frames, colour, angle, flat), seed)
+    return STYLES[style][0](analyse(rgba), tune(params(style, frames, colour, angle, flat), hand), seed)
 
 
 def main() -> None:

@@ -181,9 +181,39 @@ def make(q: dict) -> tuple[dict, dict | None]:
     return m, pp.guess_pose(eyes, view, (W, H))
 
 
+def hand_controls(t) -> dict:
+    """The hand controls of a styled clip (exposure, highlights, warmth: numbers in fx.TUNE's ranges;
+    focus: [x, y], 0..1 of the frame), checked; anything left out stays as the style has it."""
+    if t is None:
+        return {}
+    if not isinstance(t, dict):
+        raise Bad('tune: an object')
+    out = {}
+    for k, (lo, hi) in fx.TUNE.items():
+        if t.get(k) is None:
+            continue
+        try:
+            v = float(t[k])
+        except (TypeError, ValueError):
+            raise Bad(f'tune.{k}: a number')
+        if not lo <= v <= hi:
+            raise Bad(f'tune.{k}: {lo} to {hi}')
+        out[k] = round(v, 3)
+    f = t.get('focus')
+    if f is not None:
+        try:
+            x, y = float(f[0]), float(f[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            raise Bad('tune.focus: [x, y]')
+        if not (0 <= x <= 1 and 0 <= y <= 1):
+            raise Bad('tune.focus: 0 to 1')
+        out['focus'] = (round(x, 4), round(y, 4))
+    return out
+
+
 def styled(q: dict) -> tuple[fx.Frames, str]:
     """A styled clip for a request: picture, cut-out, view, the map's size (for the aspect), style,
-    long (the clip's longest side, in dots), frames, colour (streak, dust), angle (glow, dust), flat (dust). The last one is kept with the picture,
+    long (the clip's longest side, in dots), frames, colour (streak, dust), angle (glow, dust), flat (dust), tune (hand controls). The last one is kept with the picture,
     so a download right after its preview isn't drawn again."""
     p = picture(q)
     style = str(q.get('style'))
@@ -218,13 +248,14 @@ def styled(q: dict) -> tuple[fx.Frames, str]:
     if view[2] <= 1:
         raise Bad('view: too small')
     flat = style == 'dust' and bool(q.get('flat'))
-    key = (style, W, H, view, frames, colour, angle, flat, id(p['alpha']))
+    hand = hand_controls(q.get('tune'))
+    key = (style, W, H, view, frames, colour, angle, flat, tuple(sorted((k, str(v)) for k, v in hand.items())), id(p['alpha']))
     if p.get('fx', (None,))[0] == key:
         return p['fx'][1], style
     rgba = pp.frame(rgb, alpha, view, (W, H))
     if rgba[..., 3].max() < 128:
         raise Bad('Nothing of the figure is in view: move the frame onto it, or redo the cut-out.')
-    fr = fx.render(rgba, style, frames, colour or None, angle, flat=flat)
+    fr = fx.render(rgba, style, frames, colour or None, angle, flat=flat, hand=hand)
     p['fx'] = (key, fr)
     return fr, style
 

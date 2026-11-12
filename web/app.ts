@@ -668,14 +668,17 @@ type Style = Exclude<Mode, 'live'>;
 const FX_COLOURS: [string, string][] = [['red', '#ee1111'], ['white', '#f2f2f2'], ['grey', '#d8d8d8'], ['green', '#4fe08a'], ['blue', '#6f93e8'], ['amber', '#ffb347'], ['rose', '#f07aa6']];
 // each style's choices (value, label), and what it starts at: glow is a slow 3 s loop at 24 fps on a
 // fine grid, streak a fast 1 s boil on a coarse one, dust a 2 s drift on a fine one
-type FxSet = { long: number, frames: number, scale: number, angle: number | null, colour: string, flat?: boolean };
+// hand controls: sliders run -100..100 around the style's own settings (0), a factor of 2^(v/63) (about ⅓× to 3×)
+type FxSet = { long: number, frames: number, scale: number, angle: number | null, colour: string, flat?: boolean,
+  exposure: number, highlights: number, warmth: number, focus: [number, number] | null };
+const TUNE0 = { exposure: 0, highlights: 0, warmth: 0, focus: null };
 const FX: Record<Style, { long: number[], len: [number, string][], scale: number[], fps: number, d: FxSet }> = {
   glow: { long: [360, 540, 720], len: [[48, '2 s'], [72, '3 s'], [96, '4 s']], scale: [1, 2], fps: 24,
-    d: { long: 540, frames: 72, scale: 2, angle: 0, colour: '' } },
+    d: { long: 540, frames: 72, scale: 2, angle: 0, colour: '', ...TUNE0 } },
   streak: { long: [180, 270, 360], len: [[12, '½ s'], [24, '1 s'], [48, '2 s']], scale: [2, 4], fps: 24,
-    d: { long: 270, frames: 24, scale: 4, angle: 0, colour: 'red' } },
+    d: { long: 270, frames: 24, scale: 4, angle: 0, colour: 'red', ...TUNE0 } },
   dust: { long: [360, 540, 720], len: [[24, '1 s'], [48, '2 s'], [72, '3 s']], scale: [1, 2], fps: 24,
-    d: { long: 540, frames: 48, scale: 2, angle: null, colour: 'white', flat: false } },
+    d: { long: 540, frames: 48, scale: 2, angle: null, colour: 'white', flat: false, ...TUNE0 } },
 };
 // which way the dust drifts: a dial (degrees, 0 right, 90 down); auto drifts across, away from the lit side
 const fxSets: Record<Style, FxSet> = { glow: { ...FX.glow.d }, streak: { ...FX.streak.d }, dust: { ...FX.dust.d } };
@@ -692,6 +695,8 @@ function fxButtons(): void {
   $('fx-len').innerHTML = o.len.map(([v, l]) => b(v, l, v === c.frames)).join('');
   $('fx-scale').innerHTML = o.scale.map(v => b(v, v + '×', v === c.scale)).join('');
   dial(c.angle);
+  for (const k of TUNE_KEYS) { const el = $<HTMLInputElement>('tu-' + k); el.value = String(c[k]); paintRange(el); $('tu-' + k + '-out').textContent = tuneText(c[k]); }
+  placeFocus();
   setSeg('fx-colours', c.colour);
   setSeg('fx-tone', c.flat ? '1' : '0');
 }
@@ -702,6 +707,32 @@ seg('fx-colours', v => { fxSet().colour = v; renderFx(0); });
 seg('fx-long', v => { fxSet().long = Number(v); renderFx(0); });
 seg('fx-len', v => { fxSet().frames = Number(v); renderFx(0); });
 seg('fx-scale', v => { fxSet().scale = Number(v); });
+const TUNE_KEYS = ['exposure', 'highlights', 'warmth'] as const;
+const tuneF = (v: number): number => +Math.pow(2, v / 63).toFixed(3);
+const tuneText = (v: number): string => v === 0 ? '1×' : tuneF(v).toFixed(2) + '×';
+for (const k of TUNE_KEYS) range('tu-' + k, tuneText, v => { fxSet()[k] = v; renderFx(); });
+$('tu-reset').addEventListener('click', () => { Object.assign(fxSet(), TUNE0); setPickFocus(false); fxButtons(); renderFx(0); });
+$('tu-focus').addEventListener('click', () => setPickFocus(!$('fx-img').classList.contains('picking')));
+function setPickFocus(on: boolean): void {
+  $('fx-img').classList.toggle('picking', on);
+  pressed($('tu-focus'), on || fxSet().focus !== null);
+  $('tu-focus').textContent = on ? 'Click the picture' : 'Focus';
+}
+$('fx-img').addEventListener('click', e => {
+  const img = $<HTMLImageElement>('fx-img');
+  if (!img.classList.contains('picking')) return;
+  const b = img.getBoundingClientRect();
+  fxSet().focus = [Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)), Math.min(1, Math.max(0, (e.clientY - b.top) / b.height))];
+  setPickFocus(false); placeFocus(); renderFx(0);
+});
+/** The focus marker over the clip, where the light gathers (glow only). */
+function placeFocus(): void {
+  const m = $('fx-focus'), img = $<HTMLImageElement>('fx-img'), f = fxSet().focus;
+  if (!f || img.hidden || fxs.mode !== 'glow') { m.hidden = true; return; }
+  const b = img.getBoundingClientRect(), p = $('preview-box').getBoundingClientRect();
+  m.style.left = (b.left - p.left + f[0] * b.width) + 'px'; m.style.top = (b.top - p.top + f[1] * b.height) + 'px';
+  m.hidden = false;
+}
 seg('fx-angle', () => { fxSet().angle = null; dial(null); renderFx(0); });
 // the dial: its hand points the way the dust goes; drag or click round it, or use the arrow keys
 function dial(deg: number | null): void {
@@ -748,6 +779,9 @@ function setMode(m: Mode): void {
   $('fx-colours').hidden = m === 'live' || m === 'glow';
   $('fx-angle').hidden = m !== 'dust';   // glow's streams are drips: they fall straight down
   $('fx-tone').hidden = m !== 'dust';
+  $('tu-warmth-l').hidden = m !== 'glow';
+  $('tu-focus').hidden = m !== 'glow';
+  if (m !== 'glow') setPickFocus(false); else pressed($('tu-focus'), fxSet().focus !== null);
   fxButtons();
   $('fx-img').hidden = live || !fxs.url;
   $('fx-wait').hidden = true;
@@ -765,8 +799,13 @@ function setMode(m: Mode): void {
 function fxBody(format: string, scale: number, save: boolean): object {
   const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
   return { ...params(), style: fxs.mode, long: fxSet().long, frames: fxSet().frames, angle: fxs.mode === 'dust' ? fxSet().angle ?? undefined : undefined,
-    colour: fxSet().colour || undefined, flat: fxs.mode === 'dust' ? fxSet().flat : undefined, format, scale, name,
+    colour: fxSet().colour || undefined, flat: fxs.mode === 'dust' ? fxSet().flat : undefined, tune: tuneBody(), format, scale, name,
     save: save && !server.public && $<HTMLInputElement>('save').checked };
+}
+function tuneBody(): object {
+  const c = fxSet(), glow = fxs.mode === 'glow';
+  return { exposure: tuneF(c.exposure), highlights: tuneF(c.highlights), warmth: glow ? tuneF(c.warmth) : undefined,
+    focus: glow && c.focus ? c.focus : undefined };
 }
 async function fxFetch(format: string, scale: number, save = false): Promise<Response> {
   const r = await fetch('/api/fx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fxBody(format, scale, save)) });
@@ -805,6 +844,7 @@ function fitFx(): void {
   const z = room >= 1 ? Math.floor(room) : Math.max(0.1, room);
   img.style.width = fxs.w * z + 'px';
   img.style.height = fxs.h * z + 'px';
+  placeFocus();
 }
 async function downloadFx(format: 'gif' | 'webp'): Promise<void> {
   if (!st.id || fxs.mode === 'live') return;
