@@ -803,6 +803,8 @@ class Dust:
     flecks: int = 5000          # short flecks, placed afresh each frame (counts are for 540x540)
     fleck_len: tuple[int, int] = (2, 3)
     fleck_turn: float = 0.5     # share of flecks pointing any way, not along the shapes
+    fleck_join: float = 1.0     # share of slanted flecks drawn as steps that touch side to side, not corner to corner
+    fleck_lo: float = 0.5       # the dimmest a fleck's grey goes (share of the greys; 0: any)
     angle: float = 0            # the way the dust drifts off (degrees: 0 right, 90 down)
     dissolve: float = 0.97      # how much of the far side's body is gone (to motes)
     spare_lit: bool = True      # drift the other way if the far side holds the most light
@@ -1021,11 +1023,18 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
                 an = rng.uniform(0, np.pi, tw.sum())
                 fv[tw] = np.stack([np.cos(an), np.sin(an)], 1)
             ln = rng.integers(P.fleck_len[0], P.fleck_len[1] + 1, len(fs))
-            fl = rng.integers(2, NL, len(fs)).astype(np.uint8)   # never white: that's for the brightest
+            fl = rng.integers(max(2, int(P.fleck_lo * NL)), NL, len(fs)).astype(np.uint8)   # never white: that's for the brightest
             wig = rng.normal(0, 0.15, (len(fs), 2)).astype(np.float32)
+            jn = rng.random(len(fs)) < P.fleck_join if P.fleck_join > 0 else np.zeros(len(fs), bool)
+            prev = None
             for j in range(P.fleck_len[1]):
                 on = j < ln
-                plot(img, (fs + (fv + wig) * (j - ln[:, None] / 2))[on], fl[on])
+                pt = np.round(fs + (fv + wig) * (j - ln[:, None] / 2))
+                plot(img, pt[on], fl[on])
+                if prev is not None:   # a step between corner-to-corner dots, so the fleck is one piece
+                    st = on & jn & (np.abs(pt - prev).sum(1) > 1.5)
+                    plot(img, np.stack([pt[:, 0], prev[:, 1]], 1)[st], fl[st])
+                prev = pt
         # the motes
         u = np.mod(mph + s, 1)
         pos = m0 + mv * (far * u)[:, None] + perp * (bend * far * u * u + 3 * np.sin(wob + 6.283 * u) - 3 * np.sin(wob))[:, None]
@@ -1037,11 +1046,17 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         vis &= ~inner[pi_[:, 1], pi_[:, 0]]               # none over the whole of the figure: it stays clean
         ml = np.where(vis, np.clip(mlev, 1, NL), 0).astype(np.uint8)
         side = np.stack([-vel[:, 1], vel[:, 0]], 1)
+        mjn = rng.random(n) if P.fleck_join > 0 else np.ones(n)
         for j in range(P.mote_len[1]):
             on = vis & (j < mlen) & ~blob
             mj = np.where(j >= mlen - 1 - (mlen > 3), np.maximum(ml.astype(int) - 1, 1), ml)   # the tail a step dimmer
             mj = np.where((j == 0) & mhead & (ml > 0), np.minimum(ml.astype(int) + 1, NL), mj).astype(np.uint8)   # the head a step brighter
-            plot(img, (pos - vel * j)[on], mj[on])
+            pt = np.round(pos - vel * j)
+            plot(img, pt[on], mj[on])
+            if j > 0 and P.fleck_join > 0:   # corner-to-corner steps joined, so a slanted dash is one piece
+                st = on & (np.abs(pt - mprev).sum(1) > 1.5) & (mjn < P.fleck_join)
+                plot(img, np.stack([pt[:, 0], mprev[:, 1]], 1)[st], mj[st])
+            mprev = pt
             on2 = on & thick
             plot(img, (pos - vel * j + side)[on2], ml[on2])   # some two dots thick
         bi = np.nonzero(blob & vis)[0]
@@ -1179,6 +1194,7 @@ def params(style: str, frames: int | None = None, colour: str | None = None, ang
         P.grain_wide = 2.0   # flat dust art's grains run level
         P.clump_size, P.order, P.comb = 0.5, 0.3, 0.6   # finer grain, flecks combed with the drift
         P.fleck_turn, P.specks_glint, P.unplus, P.outline, P.sparkles = 0.0, 40, 0.0, 0.6, 9
+        P.fleck_join, P.fleck_lo = 0.0, 0.0
     if frames:
         P.frames = frames
     if colour and isinstance(P, (Streak, Dust)):
