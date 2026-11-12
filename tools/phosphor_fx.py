@@ -205,7 +205,8 @@ class Glow:
     even: float = 0.25          # how much of the locally evened light (CLAHE) the tone takes
     sharpen: float = 1.0        # unsharp amount: the halo along edges
     radius: float = 1.6         # and its radius (dots)
-    order: float = 0.55         # ordered (Bayer) against random dither: 1 all ordered
+    order: float = 0.3          # ordered (Bayer) against random dither: 1 all ordered
+    cross: float = 0.7          # how much the random dither's noise is shared with the dots beside, above and below
     hue: float = 0.1            # how much neighbouring dots' colours scatter
     zones: float = 10.0         # how broad the light is that sets the colour (dots)
     mix: float = 0.7            # how far neighbouring zones checker into each other, dot by dot
@@ -305,7 +306,12 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         q80, q97 = np.percentile(soft[body], [P.mass_from, 97])
         top_s = np.clip((soft - q80) / max(q97 - q80, 1e-3), 0, 1)
         p = np.maximum(p, P.lit_mass * top_s * top_s * (3 - 2 * top_s) * body)   # the very brightest a dense mass
-    thr = P.order * bayer(H, W) + (1 - P.order) * rng.random((H, W), np.float32)
+    nz = rng.random((H, W), np.float32)
+    if P.cross > 0:   # noise shared along rows and columns, not corners: dots join in short level and upright runs
+        kx = np.float32([[0, 1, 0], [1, 1, 1], [0, 1, 0]]) / 5
+        nz = (1 - P.cross) * nz + P.cross * cv2.filter2D(nz, -1, kx, borderType=cv2.BORDER_REFLECT)
+        nz = (np.argsort(np.argsort(nz, axis=None)).reshape(H, W) / nz.size).astype(np.float32)
+    thr = P.order * bayer(H, W) + (1 - P.order) * nz
 
     # colour per dot: by the broad light, in zones along one ramp (blue, blue 2, green, orange,
     # white), each zone one colour or an ordered checker of its two neighbours on the ramp, never
