@@ -220,9 +220,13 @@ class Glow:
                    (0.45, 1.0, (0.83, 0.06, 0.05, 0.045, 0.015)),
                    (0.6, 1.0, (0.68, 0.16, 0.07, 0.07, 0.02)),
                    (0.75, 1.0, (0.42, 0.38, 0.08, 0.10, 0.02)),
-                   (0.88, 1.0, (0.12, 0.10, 0.30, 0.45, 0.03)),
-                   (1.0, 1.0, (0.04, 0.02, 0.32, 0.52, 0.10)))
+                   (0.88, 0.97, (0.30, 0.10, 0.26, 0.32, 0.02)),
+                   (1.0, 0.94, (0.22, 0.03, 0.30, 0.42, 0.03)))
     floor: float = 0.06        # light fainter than this share of full is left black
+    drips: int = 60            # dotted lines falling from the picture's lower edges (0: none)
+    drip_len: tuple = (10, 40)  # how far one falls (dots)
+    drip_speed: float = 0.5    # dots a frame
+    drip_bundle: float = 0.6   # chance of another beside it, two dots over
     shake: float = 0.25        # how far a dot's place in the dither pattern is shaken (of one step): small shares still show
 
 
@@ -330,12 +334,68 @@ def animate(steps: np.ndarray, t: np.ndarray, shape: tuple, P: Glow, seed: int) 
     sparse = (steps[:, 0] > 0.02) & (steps[:, 0] < 0.98)
     blink = np.where(sparse & (rng.random(t.size) < P.twinkle))[0]
     out = np.empty((P.frames, t.size), np.uint8)
+    # each blinking dot changes at its own moments and runs through its own few thresholds in a ring,
+    # its place in the pattern first: the last change of the loop brings it back to where it started
+    n_steps = -(-P.frames // P.twinkle_hold)
+    count = np.cumsum(rng.random((n_steps, blink.size)) < P.twinkle_rate, 0)
+    total = np.maximum(count[-1], 1)
+    ring = rng.random((int(total.max()), blink.size)).astype(np.float32)
+    ring[0] = t[blink]
     f = still.copy()
-    for k in range(-(-P.frames // P.twinkle_hold)):
-        now = blink[rng.random(blink.size) < P.twinkle_rate]
-        f[now] = dots(steps[now], rng.random(now.size).astype(np.float32))
+    for k in range(n_steps):
+        f[blink] = dots(steps[blink], ring[count[k] % total, np.arange(blink.size)])
         out[k * P.twinkle_hold:(k + 1) * P.twinkle_hold] = f
     return out.reshape(P.frames, h, w)
+
+
+def drip(frames: np.ndarray, P: Glow, seed: int) -> np.ndarray:
+    """Dotted lines falling from the picture's lower edges: every other dot of a column lit, in the
+    colour of the dot it hangs from, growing downward, then thinning out; each in its own time, so
+    the loop has no seam. Drawn on black only."""
+    T, h, w = frames.shape
+    still = frames[0]
+    lit = still > 0
+    if not P.drips or T < 2 or not lit.any():
+        return frames
+    rng = np.random.default_rng(seed + 2)
+    # a lower edge: a lit dot of the picture (not a stray one) with open black under it, the more the better
+    solid = cv2.blur(lit.astype(np.float32), (5, 5)) > 0.3
+    ys = xs = np.zeros(0, int)
+    for reach in (P.drip_len[1] // 2, P.drip_len[0]):
+        clear = np.ones((h, w), bool)
+        for k in range(1, reach + 1):
+            clear[:h - k] &= ~lit[k:]
+            clear[h - k:] = False
+        ys, xs = np.where(lit & clear & solid & (np.arange(w)[None, :] % 2 == 0))
+        if len(ys) >= P.drips:
+            break
+    if not len(ys):
+        return frames
+    pick = rng.choice(len(ys), size=min(P.drips, len(ys)), replace=False)
+    cols = []
+    for y, x in zip(ys[pick], xs[pick]):
+        cols.append((y, x, still[y, x]))
+        if rng.random() < P.drip_bundle and x + 2 < w:
+            cols.append((y + int(rng.integers(-1, 2)), x + 2, still[y, x]))
+    out = frames.copy()
+    black = ~lit
+    for y, x, colour in cols:
+        # one life per loop: it falls, hangs, thins out, and is gone when the loop comes round
+        fade = 0.25 * T
+        length = min(int(rng.integers(P.drip_len[0], P.drip_len[1] + 1)), max(2, int(0.6 * T * P.drip_speed)))
+        grow = length / P.drip_speed
+        hold = T - grow - fade
+        phase, stagger = rng.random() * T, int(rng.integers(0, 2))
+        order = rng.permutation(length)                    # the order its dots go out in
+        for f in range(T):
+            t = (f + phase) % T
+            n = min(length, int(t * P.drip_speed))
+            gone = int(np.clip((t - grow - hold) / fade, 0, 1) * length)
+            for k in range(stagger, n, 2):
+                yy = y + 1 + k
+                if yy < h and black[yy, x] and order[k] >= gone:
+                    out[f, yy, x] = colour
+    return out
 
 
 def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
@@ -366,7 +426,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     cover = np.clip((cover - P.floor) / (1 - P.floor), 0, 1)   # the faintest light is black: no stray dots in the void
     shares = np.stack([np.interp(heat, xs, mix[:, k]) for k in range(5)], -1).astype(np.float32)
     steps, t = pattern(cover, shares, seed, P.shake)
-    return animate(steps, t, heat.shape, P, seed), GLOW_PALETTE.astype(np.uint8)
+    return drip(animate(steps, t, heat.shape, P, seed), P, seed), GLOW_PALETTE.astype(np.uint8)
 
 
 # ---- streak
