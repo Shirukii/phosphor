@@ -445,10 +445,6 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
         for j in range(P.stream_len[1]):
             on = (j < grow) & (j % step == 0)
             plot(img, (lsrc + ldv * j)[on], runs[on, j])
-        if not near.all():   # off the figure, no lone crumbs: only dashes and blobs
-            n_, lab, st, _ = cv2.connectedComponentsWithStats((img > 0).astype(np.uint8), connectivity=8)
-            crumb = (st[:, 4] < 3); crumb[0] = False
-            img[crumb[lab] & ~near] = 0
         out[f] = img
     return out, pal
 
@@ -770,7 +766,7 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     spk = seed_where((tt ** 4 * (a > 0.5) * (sw < 0.6)).astype(np.float32), max(0, int(round(P.sparkles * many))), rng)
     sph, sln = rng.random(len(spk)), rng.integers(2, 4, len(spk))
     inner = cv2.erode((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool) & (sw < 0.3)
-    near = cv2.dilate((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
+    off_near = cv2.dilate((a > 0.5).astype(np.uint8), np.ones((5, 5), np.uint8)).astype(bool)
     out = np.zeros((P.frames, H, W), np.uint8)
     for f in range(P.frames):
         s = f / P.frames
@@ -827,6 +823,10 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
                 pts = [(sx, sy)] + [(sx + d * j, sy) for d in (-1, 1) for j in range(1, arm + 1)] + [(sx, sy + d * j) for d in (-1, 1) for j in range(1, arm + 1)]
                 lv8 = [NL] + [NL - 1] * (len(pts) - 1)
                 plot(img, np.float32(pts), np.uint8(lv8))
+        if not off_near.all():   # off the figure, no lone crumbs: only dashes and blobs
+            n_, lab, st, _ = cv2.connectedComponentsWithStats((img > 0).astype(np.uint8), connectivity=8)
+            crumb = (st[:, 4] < 3); crumb[0] = False
+            img[crumb[lab] & ~off_near] = 0
         out[f] = img
     return out, pal
 
