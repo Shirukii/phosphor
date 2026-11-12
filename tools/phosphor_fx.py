@@ -345,7 +345,11 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     # the rim: where the light meets the dark hardest (and round the figure), parallel lines a dot
     # wide with a dot of black between, on the lit side: white and orange at the edge, then
     # salmon, then purple, fading
-    strong = gm > np.percentile(gm[a > 0.5], P.rim_level * 100) if (a > 0.5).any() else np.zeros_like(contour)
+    if (a > 0.5).any():   # the strongest edges, thinned to a line a dot wide, so the rim is clean, not a smear
+        hr = float(np.percentile(gm[a > 0.5], P.rim_level * 100))
+        strong = cv2.Canny(l8, max(4, hr * 0.6), max(8, hr)) > 0
+    else:
+        strong = np.zeros_like(contour)
     if not (a > 0.5).all():
         m8 = (a > 0.5).astype(np.uint8)
         lit_out = soft > np.percentile(soft[a > 0.5], 80)          # only where the outline is lit
