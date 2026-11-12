@@ -334,7 +334,7 @@ def glow(A: dict, P: Glow | None = None, seed: int = 1) -> Frames:
     if P.focus > 0 and body.any():   # one or two warm places, where the broad light gathers most: the rest goes cool
         key = cv2.GaussianBlur(zone, (0, 0), P.focus_size * max(H, W))
         key = np.clip((key - key[body].min()) / (np.ptp(key[body]) + 1e-6), 0, 1)
-        v = v * (1 - P.focus * (1 - key))
+        v = v * (1 - P.focus * (1 - key) * np.clip(1 - 2 * hot, 0, 1))   # not in the hot core: its colour is its own
     lit0 = thr < p
     anchors = np.quantile(v[lit0], P.ramp) if lit0.any() else np.linspace(0, 1, 5)
     r = np.interp(v, np.maximum.accumulate(anchors + np.arange(5) * 1e-6), np.arange(5))
