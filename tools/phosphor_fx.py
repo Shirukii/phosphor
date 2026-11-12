@@ -513,7 +513,7 @@ class Streak:
     gain: float = 1.0           # more or less light
     gamma: float = 1.7          # tone curve: above 1, darker mid-tones and more contrast
     local: float = 0.5          # local contrast before the dither (light against its surroundings, 8 dots)
-    most: float = 0.8           # the densest the dots get: dense in the highlights, never solid
+    most: float = 0.75          # the densest the dots get: dense in the highlights, never solid
     shades: int = 1             # 1: one ink, tone by how many dots only; 3: three shades of it
     black: float = 0.25         # light below this is black (no haze of stray dots in the shade)
     floor: float = 0.0          # and after the tone curve, light below this (no even sprinkle in the dim)
@@ -731,7 +731,7 @@ class Dust:
     most: float = 0.55          # the densest the specks get, in the brightest light
     clump: float = 1.0          # how much the specks clump (0: even white noise): grains, not a sieve
     clump_size: float = 0.5     # the blur that clumps them (dots): finer keeps small features
-    lone: float = 0.7           # share of specks touching no other at their sides that go
+    lone: float = 1.0           # share of specks touching no other at their sides that go
     outline: float = 0.6        # how much of the silhouette and strongest edges is drawn as bright strokes
     dust_floor: float = 0.1     # the least density in the intact figure (a cut-out only): its shade doesn't go black
     pair: float = 0.6           # share of lone body specks given a neighbour along the shapes
