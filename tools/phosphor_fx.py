@@ -655,7 +655,8 @@ class Dust:
     mote_len: tuple[int, int] = (3, 8)   # dots in a mote: a short dash along its way
     falloff: float = 1.5        # how fast motes thin out as they go
     swirl: float = 20.0         # how far the drift turns region by region (degrees, typical)
-    jitter: float = 20.0        # how far each mote's heading strays from its lane's (degrees, typical)
+    thick: float = 0.35         # share of motes two dots thick
+    jitter: float = 25.0        # how far each mote's heading strays from its lane's (degrees, typical)
     bend: float = 0.2           # how far the lanes curve off the angle
     comb: float = 0.6           # how far the flecks lie along the drift, not the shapes, inside the figure
 
@@ -754,7 +755,8 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
     mph = rng.random(n).astype(np.float32)
     mlen = rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n, p=None) if P.mote_len[1] > P.mote_len[0] else np.full(n, P.mote_len[0])
     mlen = np.minimum(mlen, rng.choice(np.arange(P.mote_len[0], P.mote_len[1] + 1), n))   # short ones the most
-    mlev = rng.integers(NL - 2, NL + 1, n)   # the top greys, white the least often
+    mlev = rng.integers(NL - 1, NL + 1, n)   # the top two greys: crisp, not smudge
+    thick = rng.random(n) < P.thick
     blob = rng.random(n) < P.blobs * many / max(n, 1)
     bdots = rng.uniform(-3.5, 3.5, (n, 12, 2)).astype(np.float32)   # a blob: a loose round cluster
     bdots[np.hypot(bdots[..., 0], bdots[..., 1]) > 3.5] = np.nan
@@ -805,9 +807,12 @@ def dust(A: dict, P: Dust | None = None, seed: int = 1) -> Frames:
         pi_ = np.clip(np.round(pos).astype(int), 0, [W - 1, H - 1])
         vis &= ~inner[pi_[:, 1], pi_[:, 0]]               # none over the whole of the figure: it stays clean
         ml = np.where(vis, np.clip(mlev, 1, NL), 0).astype(np.uint8)
+        side = np.stack([-vel[:, 1], vel[:, 0]], 1)
         for j in range(P.mote_len[1]):
             on = vis & (j < mlen) & ~blob
             plot(img, (pos - vel * j)[on], ml[on])
+            on2 = on & thick
+            plot(img, (pos - vel * j + side)[on2], ml[on2])   # some two dots thick
         bi = np.nonzero(blob & vis)[0]
         if len(bi):
             pts = (pos[bi, None] + bdots[bi]).reshape(-1, 2)
