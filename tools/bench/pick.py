@@ -26,10 +26,12 @@ def main() -> None:
     rng = random.Random(tag)
     rng.shuffle(rows)
     key, pairs = {}, []
+    swaps = [i % 2 == 0 for i in range(len(rows))]   # A is on the left in exactly half the pairs
+    rng.shuffle(swaps)
     for i, (name, top, a, b) in enumerate(rows):
         k = f'{i:02d}'
         Image.open(top).convert('RGB').save(out / f'{k}_in.jpg', quality=92, subsampling=0)
-        swap = rng.random() < 0.5
+        swap = swaps[i]
         left, right = (b, a) if swap else (a, b)
         Image.open(left).convert('RGB').save(out / f'{k}_L.png')
         Image.open(right).convert('RGB').save(out / f'{k}_R.png')
