@@ -1,16 +1,14 @@
 // Phosphor's web interface: a picture in, a looping clip out (glow, streak, dust), or a live dot map.
 // The server (tools/phosphor_web.py) does the image work: cut-out, framing, the clips, the map, PNGs.
 // This page holds the choices (box, brush marks, view, shape, the style's settings), sends them, and
-// shows the result; the map's live preview is drawn here by the renderer itself.
+// shows the result; the map's preview is drawn here by the renderer itself, held still but for particles.
 
 import { Phosphor, PRESETS, type ParticlesFrom, type PhosphorMap, type Preset } from '../src/phosphor';
 
-type Eye = [number, number, number];      // x, y, half-width (picture px)
 type View = [number, number, number];     // left, top, width (picture px); height from the map's aspect
 type Stroke = [number, number, number, boolean]; // x, y, radius (picture px), keep
-type Tool = 'box' | 'keep' | 'remove' | 'eyes' | 'frame';
+type Tool = 'box' | 'keep' | 'remove' | 'frame';
 type Pt = [number, number];
-interface Pose { pivot?: Pt; center?: Pt }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
 const narrow = matchMedia('(max-width: 900px)');
@@ -88,19 +86,14 @@ const st = {
   view: null as View | null,
   framed: false,                  // the view was moved by hand: a new cut-out keeps it
   size: [512, 512] as Pt,
-  eyes: [] as Eye[],
-  eyeSel: -1,
   tone: { ...toneDefaults },
   tool: 'box' as Tool,
   brush: 20,                      // screen px
-  pose: null as Pose | null,      // guessed from the eyes
-  poseSet: {} as Pose,            // clicked
   map: null as PhosphorMap | null,
   frames: 1,
 };
 const look = {
-  preset: 'blue' as Preset, dot: 1, full: false, rays: false, particles: 'off' as 'off' | ParticlesFrom,
-  blinkEvery: 4.5, breath: 1, sleep: false,
+  preset: 'blue' as Preset, dot: 1, full: false, particles: 'off' as 'off' | ParticlesFrom,
 };
 let server = { public: false, maxSize: 2048, maxOut: 0 };
 
@@ -246,13 +239,6 @@ function draw(): void {
     g.setLineDash([5, 4]); g.strokeStyle = '#f2c76b'; g.lineWidth = 1.25;
     g.strokeRect(x0, y0, x1 - x0, y1 - y0); g.setLineDash([]);
   }
-  // eyes
-  st.eyes.forEach(([x, y, r], i) => {
-    const [sx, sy] = toScreen(x, y), sel = i === st.eyeSel;
-    g.strokeStyle = sel ? '#ffffff' : acc; g.lineWidth = sel ? 1.75 : 1.25;
-    g.beginPath(); g.ellipse(sx, sy, r * s, r * 0.65 * s, 0, 0, Math.PI * 2); g.stroke();
-    g.beginPath(); g.moveTo(sx - 4, sy); g.lineTo(sx + 4, sy); g.moveTo(sx, sy - 4); g.lineTo(sx, sy + 4); g.stroke();
-  });
   // brush cursor
   if (hover && !drag?.touch && (st.tool === 'keep' || st.tool === 'remove')) {
     g.strokeStyle = st.tool === 'keep' ? '#5fd890' : '#f07a8c'; g.lineWidth = 1;
@@ -261,14 +247,12 @@ function draw(): void {
 }
 
 let hover: Pt | null = null;
-let drag: { kind: 'box' | 'paint' | 'eye' | 'view'; start: Pt; last: Pt; eye?: number; view?: View; touch: boolean } | null = null;
+let drag: { kind: 'box' | 'paint' | 'view'; start: Pt; last: Pt; view?: View; touch: boolean } | null = null;
 
 const at = (e: PointerEvent | WheelEvent | MouseEvent): Pt => {
   const r = cv.getBoundingClientRect();
   return [e.clientX - r.left, e.clientY - r.top];
 };
-const eyeAt = (p: Pt): number => st.eyes.findIndex(([x, y, r]) => Math.hypot(p[0] - x, (p[1] - y) / 0.65) <= r + 8 / fit.s);
-
 cv.addEventListener('pointerdown', e => {
   if (!st.img || e.button !== 0) return;
   cv.setPointerCapture(e.pointerId);
@@ -280,20 +264,6 @@ cv.addEventListener('pointerdown', e => {
     if (st.skip) setSkip(false);
     drag = { kind: 'paint', start: p, last: p, touch };
     dab(p);
-  } else if (st.tool === 'eyes') {
-    let i = eyeAt(p);
-    if (i < 0) {
-      const r = st.eyes.length ? st.eyes[st.eyes.length - 1][2] : Math.round(Math.min(st.iw, st.ih) * 0.04);
-      if (st.eyes.length >= 2) { // a third tap moves the nearer one
-        i = Math.hypot(p[0] - st.eyes[0][0], p[1] - st.eyes[0][1]) < Math.hypot(p[0] - st.eyes[1][0], p[1] - st.eyes[1][1]) ? 0 : 1;
-        st.eyes[i] = [p[0], p[1], st.eyes[i][2]];
-      } else {
-        st.eyes.push([p[0], p[1], r]);
-        i = st.eyes.length - 1;
-      }
-    }
-    selectEye(i);
-    drag = { kind: 'eye', start: p, last: p, eye: i, touch };
   } else if (st.tool === 'frame' && st.view) {
     drag = { kind: 'view', start: p, last: p, view: [...st.view] as View, touch };
   }
@@ -315,10 +285,6 @@ cv.addEventListener('pointermove', e => {
       dab([drag.last[0] + (p[0] - drag.last[0]) * t, drag.last[1] + (p[1] - drag.last[1]) * t]);
     }
     if (d >= step) drag.last = p;
-  } else if (drag.kind === 'eye' && drag.eye !== undefined) {
-    const e0 = st.eyes[drag.eye];
-    st.eyes[drag.eye] = [e0[0] + p[0] - drag.last[0], e0[1] + p[1] - drag.last[1], e0[2]];
-    drag.last = p;
   } else if (drag.kind === 'view' && drag.view && st.view) {
     st.view = [drag.view[0] - (p[0] - drag.start[0]), drag.view[1] - (p[1] - drag.start[1]), drag.view[2]];
     st.framed = true;
@@ -347,24 +313,8 @@ cv.addEventListener('wheel', e => {
   if (st.tool === 'frame' && st.view) {
     e.preventDefault();
     zoomView(st.view[2] * f, p);
-  } else if (st.tool === 'eyes') {
-    const i = eyeAt(p);
-    if (i < 0) return;
-    e.preventDefault();
-    st.eyes[i] = [st.eyes[i][0], st.eyes[i][1], Math.max(2, st.eyes[i][2] / f)];
-    selectEye(i); draw(); rebuild();
   }
 }, { passive: false });
-
-cv.addEventListener('contextmenu', e => {
-  if (st.tool !== 'eyes') return;
-  const i = eyeAt(toPic(...at(e)));
-  if (i < 0) return;
-  e.preventDefault();
-  st.eyes.splice(i, 1);
-  selectEye(st.eyes.length - 1);
-  draw(); rebuild(0);
-});
 
 function dab(p: Pt): void { st.strokes.push([p[0], p[1], st.brush / fit.s, st.tool === 'keep']); }
 
@@ -386,25 +336,11 @@ function syncZoom(): void {
   setRange('zoom', z, `${Math.round(st.iw / st.view[2] * 100)}%`);
 }
 
-function selectEye(i: number): void {
-  st.eyeSel = i;
-  const sl = $<HTMLInputElement>('eye-r');
-  if (i >= 0 && st.eyes[i]) {
-    sl.disabled = false;
-    sl.max = String(Math.max(10, Math.round(Math.min(st.iw, st.ih) * 0.2)));
-    setRange('eye-r', Math.round(st.eyes[i][2]), `${Math.round(st.eyes[i][2])} px`);
-  } else {
-    sl.disabled = true;
-    $('eye-r-out').textContent = '–';
-  }
-}
-
 function setTool(t: Tool): void {
-  if (t === 'eyes' && fxs.mode !== 'live') t = 'box';   // eyes are the map's
   st.tool = t;
   $('editor-box').dataset.tool = t;
   document.querySelectorAll<HTMLButtonElement>('#tools button').forEach(b => pressed(b, b.dataset.tool === t));
-  cv.style.cursor = t === 'frame' ? 'grab' : t === 'eyes' ? 'crosshair' : t === 'box' ? 'crosshair' : 'none';
+  cv.style.cursor = t === 'frame' ? 'grab' : t === 'box' ? 'crosshair' : 'none';
   draw();
 }
 
@@ -422,13 +358,12 @@ async function openPicture(body: { name: string; data?: string }, src: string): 
   if (!img) { status('Could not show that picture.', 'bad'); return; }
   Object.assign(st, {
     id: r.id, name: r.name, iw: r.w, ih: r.h, img, mask: null, rect: null, strokes: [], view: null, framed: false,
-    eyes: [], eyeSel: -1, pose: null, poseSet: {}, map: null, frames: 1,
+    map: null, frames: 1,
   });
   $<HTMLInputElement>('name').value = r.name;
   fxs.seq++; fxs.w = 0; $('fx-img').hidden = true; // the last picture's clip
   clearThumbs(); fresh = true;
   setSkip(r.hasAlpha); // a picture with its own transparency is cut out already
-  selectEye(-1);
   setTool('box');
   $('file-meta').innerHTML = `<strong>${esc(r.name)}</strong><span>${r.w} × ${r.h}</span>`;
   $('src-meta').textContent = `${r.w} × ${r.h}${r.hasAlpha ? ' · transparent' : ''}`;
@@ -455,20 +390,18 @@ function rebuild(ms = 300): void {
   buildTimer = window.setTimeout(() => { void build(); }, ms);
 }
 
-const params = (): object => ({ id: st.id, view: st.view, size: st.size, eyes: st.eyes, tone: st.tone });
+const params = (): object => ({ id: st.id, view: st.view, size: st.size, tone: st.tone });
 
 async function build(): Promise<void> {
   if (!st.id || !st.view) return;
   const seq = ++buildSeq;
-  const r = await task('Building…', () => post<{ map: PhosphorMap; stats: { lit: number }; pose: Pose | null }>('/api/build', params()));
+  const r = await task('Building…', () => post<{ map: PhosphorMap; stats: { lit: number } }>('/api/build', params()));
   if (!r || seq !== buildSeq) return;
   st.map = r.map;
-  st.pose = r.pose;
   st.frames = 1 + Object.keys(r.map.frames).length;
   showPreview();
-  const blinks = st.frames > 1;
-  $('live-meta').textContent = `${r.map.w} × ${r.map.h} · ${Math.round(r.stats.lit * 100)}% lit · ${blinks ? 'blinks' : 'no blink yet'}`;
-  status(blinks ? 'Ready' : 'Ready · mark the eyes to make it blink', 'ok');
+  $('live-meta').textContent = `${r.map.w} × ${r.map.h} · ${Math.round(r.stats.lit * 100)}% lit`;
+  status('Ready', 'ok');
   $<HTMLButtonElement>('export').disabled = false;
   exportSummary();
   if (fxs.mode !== 'live') renderFx(); else void renderThumbs();
@@ -479,15 +412,12 @@ async function build(): Promise<void> {
 let ph: Phosphor | null = null;
 let zoom = 1;
 
-function pose(): Pose { return { ...(st.pose ?? {}), ...st.poseSet }; }
-
 function showPreview(): void {
   if (!st.map) return;
   const first = !ph;
   if (ph) { ph.destroy(); ph.canvas.remove(); }
-  const p = pose();
   ph = new Phosphor({
-    map: st.map, pivot: p.pivot, center: p.center, colors: () => PRESETS[look.preset], pixelRatio: () => 1,
+    map: st.map, colors: () => PRESETS[look.preset], pixelRatio: () => 1,
     reveal: first, particlesFrom: look.particles === 'off' ? 'right' : look.particles,
   });
   applyLook();
@@ -500,13 +430,12 @@ function showPreview(): void {
 function applyLook(): void {
   if (!ph) return;
   Object.assign(ph.look, {
-    full: look.full ? 1 : 1.01, burst: look.rays ? 1 : 0,
+    full: look.full ? 1 : 1.01, burst: 0,
     particles: look.particles === 'off' ? 0 : look.particles === 'all' ? 40 : 16,
-    blinkEvery: look.blinkEvery, breathTilt: 1.5 * look.breath, breathRise: 2.5 * look.breath,
+    blinkEvery: 0, breathTilt: 0, breathRise: 0,   // held still: no blink, no breathing
   });
   ph.dot = look.dot === 2 ? 2 : null;
   if (look.particles !== 'off') ph.particlesFrom = look.particles;
-  ph.sleep(look.sleep);
   ph.palette();
 }
 
@@ -522,35 +451,7 @@ function fitPreview(): void {
   stage.style.width = W * zoom + 'px';
   stage.style.height = H * zoom + 'px';
   stage.style.marginBottom = bar + 'px';
-  placeMarkers();
 }
-
-function placeMarkers(): void {
-  const p = pose(), M = st.map;
-  if (!M) return;
-  for (const k of ['pivot', 'center'] as const) {
-    const el = $(k === 'pivot' ? 'm-pivot' : 'm-center');
-    const v = p[k] ?? (k === 'pivot' ? [M.w / 2, M.h * 0.8] : [M.w / 2, M.h * 0.45]);
-    el.style.left = v[0] * zoom + 'px';
-    el.style.top = v[1] * zoom + 'px';
-  }
-}
-
-let picking: 'pivot' | 'center' | null = null;
-function setPicking(k: 'pivot' | 'center' | null): void {
-  picking = k;
-  setSeg('pick', k ?? '');
-  $('preview-box').classList.toggle('picking', !!k);
-  $('pick-note').textContent = k === 'pivot' ? 'Click the top of the neck' : 'Click the middle of the head';
-  placeMarkers();
-}
-$('stage').addEventListener('click', e => {
-  if (!picking || !st.map) return;
-  const r = $('stage').getBoundingClientRect();
-  st.poseSet[picking] = [Math.round((e.clientX - r.left) / zoom), Math.round((e.clientY - r.top) / zoom)];
-  setPicking(null);
-  showPreview();
-});
 
 /** The accent follows the palette: the page takes the preview's colour. */
 function setAccent(p: Preset): void {
@@ -576,17 +477,7 @@ $('presets').innerHTML = Object.entries(PRESETS).map(([k, c]) =>
 seg('presets', v => { look.preset = v as Preset; ph?.palette(); setAccent(look.preset); });
 seg('dot', v => { look.dot = Number(v); applyLook(); });
 seg('parts', v => { look.particles = v as typeof look.particles; applyLook(); });
-$('pick').addEventListener('click', e => {
-  const b = (e.target as HTMLElement).closest('button');
-  if (!b?.dataset.v) return;
-  setPicking(picking === b.dataset.v ? null : b.dataset.v as 'pivot' | 'center');
-});
-toggle('sleep', v => { look.sleep = v; applyLook(); });
 toggle('full', v => { look.full = v; applyLook(); });
-toggle('rays', v => { look.rays = v; applyLook(); });
-$('reveal').addEventListener('click', () => ph?.reveal());
-range('blink-every', v => v ? `${v} s` : 'never', v => { look.blinkEvery = v; applyLook(); });
-range('breath', v => `${v.toFixed(1)}×`, v => { look.breath = v; applyLook(); });
 
 range('brush', v => `${v} px`, v => { st.brush = v; draw(); });
 $<HTMLInputElement>('skip').addEventListener('change', e => { st.skip = (e.target as HTMLInputElement).checked; void cutout(); });
@@ -595,13 +486,6 @@ $('clear-strokes').addEventListener('click', () => { if (st.strokes.length) { st
 function undoStroke(): void { if (st.strokes.pop()) { draw(); void cutout(); } }
 $('undo-stroke').addEventListener('click', undoStroke);
 
-range('eye-r', v => `${v} px`, v => {
-  const i = st.eyeSel;
-  if (i < 0 || !st.eyes[i]) return;
-  st.eyes[i] = [st.eyes[i][0], st.eyes[i][1], v];
-  draw(); rebuild();
-});
-$('clear-eyes').addEventListener('click', () => { st.eyes = []; selectEye(-1); draw(); rebuild(0); });
 range('zoom', () => st.view ? `${Math.round(st.iw / st.view[2] * 100)}%` : '–', v => { if (st.iw) zoomView(st.iw / Math.pow(2, v)); });
 
 // size
@@ -617,7 +501,6 @@ function setSize(W: number, H: number): void {
   $<HTMLInputElement>('h').value = String(H);
   document.querySelectorAll<HTMLElement>('#sizes .chip, #shapes .chip').forEach(c => pressed(c, c.dataset.v === `${W}x${H}`));
   remember();
-  st.poseSet = {}; // in map px: no longer where they were
   exportSummary();
   layout(); rebuild(0);
 }
@@ -841,7 +724,6 @@ function setMode(m: Mode): void {
   $('tu-warmth-l').hidden = m !== 'glow';
   $('tu-focus').hidden = m !== 'glow';
   setPickFocus(false);
-  if (!live && st.tool === 'eyes') setTool('box');
   fxButtons();
   $('fx-wait').hidden = true;
   $('fx-img').hidden = true;   // the last clip was another style, or another picture
@@ -854,7 +736,6 @@ function setMode(m: Mode): void {
     $('prev-empty').hidden = !!st.map;
     requestAnimationFrame(() => { layout(); fitPreview(); });
   } else {
-    if (picking) setPicking(null);
     $('prev-empty').hidden = !!st.id;
     requestAnimationFrame(layout);
     renderFx(0);
@@ -1071,7 +952,7 @@ addEventListener('keydown', e => {
   }
   if (e.shiftKey && e.key.toLowerCase() === 'f') { fullScreen(); e.preventDefault(); return; }
   if (!e.shiftKey && fxs.mode !== 'live' && (e.key === 'g' || e.key === 'w') && !$<HTMLButtonElement>('fx-gif').disabled) { void downloadFx(e.key === 'g' ? 'gif' : 'webp'); e.preventDefault(); return; }
-  const tools: Record<string, Tool> = { b: 'box', k: 'keep', r: 'remove', e: 'eyes', f: 'frame' };
+  const tools: Record<string, Tool> = { b: 'box', k: 'keep', r: 'remove', f: 'frame' };
   const k = e.key.toLowerCase();
   if (tools[k] && st.img) { if (!editing()) showView('split'); setTool(tools[k]); e.preventDefault(); }
   else if (k === 'o') { pick(); e.preventDefault(); }
@@ -1079,7 +960,7 @@ addEventListener('keydown', e => {
     st.brush = Math.max(4, Math.min(80, st.brush + (k === ']' ? 4 : -4)));
     setRange('brush', st.brush, `${st.brush} px`);
     draw();
-  } else if (k === 'escape' && picking) setPicking(null);
+  }
 });
 
 // ---- start

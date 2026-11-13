@@ -203,7 +203,7 @@
   .opts { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; height: 30px; padding: 0 12px; background: rgba(0, 0, 0, .82); z-index: 2; white-space: nowrap; font-size: 12px; }
   .opts > * { display: none; }
   [data-tool=box] .opts .for-box, [data-tool=keep] .opts .for-brush, [data-tool=remove] .opts .for-brush, [data-tool=frame] .opts .for-frame { display: flex; }
-  [data-tool=eyes] .opts, body:not(.has-pic) .opts { display: none; }
+  body:not(.has-pic) .opts { display: none; }
   .opts .range { align-items: center; gap: 10px; }
   .opts .range input { width: 120px; }
   .opts .range output { min-width: 34px; }
@@ -230,15 +230,6 @@
   #fx-img { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
   #fx-img.picking { cursor: crosshair; }
   #fx-focus { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 1px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000; pointer-events: none; z-index: 2; }
-  .marker { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; pointer-events: none; display: none; }
-  .marker::before, .marker::after { content: ''; position: absolute; background: #f2c76b; }
-  .marker::before { left: 7.5px; top: 0; width: 1px; height: 16px; }
-  .marker::after { top: 7.5px; left: 0; width: 16px; height: 1px; }
-  .marker span { position: absolute; left: 14px; top: -14px; font: 10px/1 var(--mono); color: #f2c76b; white-space: nowrap; }
-  .picking .marker { display: block; }
-  .picking #stage { cursor: crosshair; }
-  .pick-note { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); padding: 6px 12px; background: #f2c76b; color: #000; font-size: 12px; font-weight: 600; display: none; z-index: 2; white-space: nowrap; }
-  .picking .pick-note { display: block; }
   .ghost-screen { color: var(--faint); font-size: 12px; }
   .fx-wait { display: grid; justify-items: center; gap: 12px; color: var(--mute); font-size: 12px; z-index: 1; }
   .fx-wait i { display: flex; gap: 5px; }
@@ -331,8 +322,6 @@
             <svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><circle cx="9" cy="9" r="6.5"/><path d="M9 6v6M6 9h6"/></svg>Keep</button>
           <button data-tool="remove" title="Remove: brush over the background (R)">
             <svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><circle cx="9" cy="9" r="6.5"/><path d="M6 9h6"/></svg>Remove</button>
-          <button data-tool="eyes" class="only-map" title="Eyes: tap the middle of each eye (E)">
-            <svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M1.5 9s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5z"/><circle cx="9" cy="9" r="2.2"/></svg>Eyes</button>
           <button data-tool="frame" title="Frame: drag to move, scroll to zoom (F)">
             <svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M2.5 6.5v-4h4M11.5 2.5h4v4M15.5 11.5v4h-4M6.5 15.5h-4v-4"/></svg>Frame</button>
         </nav>
@@ -345,13 +334,12 @@
         <button class="btn ghost icon" id="full-btn" title="Full screen (Shift+F)" aria-label="Full screen">
           <svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5v-4h4M11.5 2.5h4v4M15.5 11.5v4h-4M6.5 15.5h-4v-4"/></svg></button>
         <div class="screen">
-          <div id="stage"><div class="marker" id="m-pivot"><span>neck</span></div><div class="marker" id="m-center"><span>head</span></div></div>
+          <div id="stage"></div>
           <img id="fx-img" alt="The picture in the chosen style" hidden>
           <i id="fx-focus" hidden></i>
           <div class="fx-wait" id="fx-wait" hidden><i><b></b></i><span>Rendering</span></div>
           <div class="ghost-screen" id="prev-empty"></div>
         </div>
-        <div class="pick-note" id="pick-note">Click the top of the neck</div>
         <div class="live-bar off" id="live-bar">
           <div class="group swatches" id="presets"></div>
           <div class="group" id="dot"><button data-v="1" aria-pressed="true" title="1 px dots">1px</button><button data-v="2" title="2 × 2 px dots: a coarser grid">2px</button></div>
@@ -372,7 +360,7 @@
           <button data-v="glow" aria-pressed="true" title="Blue dots that warm where the light gathers"><span class="thumb"><img id="th-glow" alt="" hidden></span><span class="name"><span data-dm="GLOW"></span></span></button>
           <button data-v="streak" title="One colour on a coarse grid, with rain"><span class="thumb"><img id="th-streak" alt="" hidden></span><span class="name"><span data-dm="STREAK"></span></span></button>
           <button data-v="dust" title="White dots and dashes, streaming off"><span class="thumb"><img id="th-dust" alt="" hidden></span><span class="name"><span data-dm="DUST"></span></span></button>
-          <button data-v="live" title="A live dot map that breathes and blinks, for your own code"><span class="thumb"><canvas id="th-live" width="160" height="100"></canvas></span><span class="name"><span data-dm="MAP"></span></span></button>
+          <button data-v="live" title="A dot map and PNGs, for your own code"><span class="thumb"><canvas id="th-live" width="160" height="100"></canvas></span><span class="name"><span data-dm="MAP"></span></span></button>
         </div>
       </section>
 
@@ -415,15 +403,8 @@
           <div class="sub inline"><span class="label">Dot size</span><div class="seg fill" id="fx-scale" title="Pixels per dot in the file"></div></div>
         </div>
         <div class="only-map stack">
-          <div class="seg fill"><button id="sleep" aria-pressed="false" title="Fall asleep: eyes shut, head droops">Sleep</button><button id="full" aria-pressed="false" title="Fully lit areas stay solid instead of flickering">Solid</button><button id="rays" aria-pressed="false" title="Rays behind the figure">Rays</button></div>
           <div class="sub inline"><span class="label">Particles</span><div class="seg fill" id="parts"><button data-v="off" aria-pressed="true">Off</button><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="all">All</button></div></div>
-          <div class="sub inline"><span class="label">Place</span><div class="seg fill" id="pick"><button data-v="pivot" title="Click the top of the neck: the head tilts about it">Neck</button><button data-v="center" title="Click the middle of the head: the rays come from it">Head</button><button id="reveal" title="Play the start-up again">Replay</button></div></div>
-          <hr>
-          <p class="hint">Tap each eye with the Eyes tool to make it blink.</p>
-          <div class="range"><label for="eye-r">Eye size</label><output id="eye-r-out">–</output><input type="range" id="eye-r" min="2" max="200" value="30" disabled></div>
-          <div class="range"><label for="blink-every">Blinks every</label><output id="blink-every-out">4.5 s</output><input type="range" id="blink-every" min="0" max="10" step="0.5" value="4.5"></div>
-          <div class="range"><label for="breath">Breathing</label><output id="breath-out">1.0×</output><input type="range" id="breath" min="0" max="3" step="0.1" value="1"></div>
-          <div class="row split"><button class="btn sm" id="clear-eyes">Remove eyes</button><button class="btn sm" id="reset-tone">Reset tone</button></div>
+          <div class="row split"><button class="btn sm" id="full" aria-pressed="false" title="Fully lit areas stay solid instead of flickering">Solid light</button><button class="btn sm" id="reset-tone">Reset tone</button></div>
           <div class="sub" id="tone"></div>
           <hr>
           <div class="sub"><span class="label">Colours</span><div class="chips" id="ex-colours"></div></div>

@@ -66,11 +66,11 @@ the size), also saved to `out/<name>/fx/`. The page remembers the style, its set
   dust streams off, detail (dots across), length, dot size and the file's name. Double-click a
   slider to reset it.
 
-In **Map** mode the panel has the map's own steps instead: its size in dots (any up to 2048×2048),
-**Eyes** (click the middle of each eye: Phosphor paints them shut for the blink and sleep frame),
-**Tone**, and an export of `map.ts` plus PNGs per state and background as a zip. The preview there
-is the renderer itself: palettes and 1px / 2px dots under it, and in More: sleep, solid full light, rays, particles, blink
-rate, breathing; *Neck* / *Head* place the tilt pivot and the rays' centre.
+In **Map** mode the panel has the map's own settings instead: its size in dots (any up to
+2048×2048), and under More, particles, solid full light, **Tone**, and an export of `map.ts` plus
+PNGs per colour and background as a zip. The preview there is the renderer itself, held still:
+palettes and 1px / 2px dots under it. Blinking, breathing, sleep and rays are the renderer's own
+(see below) and are not in the page.
 
 Press `?` for the keyboard shortcuts.
 
