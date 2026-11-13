@@ -52,8 +52,9 @@ npm run web
 
 Then open http://localhost:8340, and drop a picture on it or pick one from `in/`.
 
-Pick a style in the header: **Glow**, **Streak** or **Dust** make a looping clip, **Map** makes the
-live dot map for your own code. The page remembers the style, its settings and the shape.
+Pick a style from the four tiles, which show the open picture in each: **Glow**, **Streak** or
+**Dust** make a looping clip, **Map** makes the live dot map for your own code. The stage shows the
+picture, the result, or both (`V`). The page remembers the style, its settings and the shape.
 
 1. **Cut-out:** it guesses at once. Draw a box around the figure to redo it, and brush with
    *keep* / *remove* to fix what it got wrong (Ctrl+Z undoes a mark). A picture with its own

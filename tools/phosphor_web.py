@@ -257,7 +257,8 @@ def styled(q: dict) -> tuple[fx.Frames, str]:
     if rgba[..., 3].max() < 128:
         raise Bad('Nothing of the figure is in view: move the frame onto it, or redo the cut-out.')
     fr = fx.render(rgba, style, frames, colour or None, angle, flat=flat, hand=hand, streaks=streaks)
-    p['fx'] = (key, fr)
+    if not q.get('thumb'):   # a thumbnail doesn't push out the clip a download would reuse
+        p['fx'] = (key, fr)
     return fr, style
 
 

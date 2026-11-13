@@ -13,7 +13,7 @@ type Pt = [number, number];
 interface Pose { pivot?: Pt; center?: Pt }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
-const narrow = matchMedia('(max-width: 820px)');
+const narrow = matchMedia('(max-width: 900px)');
 
 async function post<T>(path: string, body: object): Promise<T> {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -207,6 +207,7 @@ function draw(): void {
   const w = cv.width, h = cv.height;
   g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, w, h); g.restore();
   $('drop').hidden = !!st.img;
+  document.body.classList.toggle('has-pic', !!st.img);
   $('tools').classList.toggle('off', !st.img);
   if (!st.img) return;
   const { s, ox, oy } = fit, acc = css('--accent');
@@ -424,6 +425,7 @@ async function openPicture(body: { name: string; data?: string }, src: string): 
   });
   $<HTMLInputElement>('name').value = r.name;
   fxs.seq++; fxs.w = 0; $('fx-img').hidden = true; // the last picture's clip
+  clearThumbs(); fresh = true;
   setSkip(r.hasAlpha); // a picture with its own transparency is cut out already
   selectEye(-1);
   setTool('box');
@@ -468,7 +470,7 @@ async function build(): Promise<void> {
   status(blinks ? 'Ready' : 'Ready · mark the eyes to make it blink', 'ok');
   $<HTMLButtonElement>('export').disabled = false;
   exportSummary();
-  if (fxs.mode !== 'live') renderFx();
+  if (fxs.mode !== 'live') renderFx(); else void renderThumbs();
 }
 
 // ---- the live preview
@@ -551,7 +553,14 @@ $('stage').addEventListener('click', e => {
 
 /** The accent follows the palette: the page takes the preview's colour. */
 function setAccent(p: Preset): void {
-  document.documentElement.style.setProperty('--accent', PRESETS[p][1]);
+  tint(PRESETS[p][1]);
+}
+/** The page takes the colour of what it is making: glow's blue, streak's or dust's own, the map's palette. */
+function tint(colour?: string): void {
+  const m = fxs.mode;
+  const c = colour ?? (m === 'live' ? PRESETS[look.preset][1] : m === 'glow' ? '#5b93f0'
+    : FX_COLOURS.find(([v]) => v === fxSets[m].colour)?.[1] ?? '#5b93f0');
+  document.documentElement.style.setProperty('--accent', c);
   document.querySelectorAll<HTMLInputElement>('input[type=range]').forEach(paintRange);
   draw();
 }
@@ -752,7 +761,7 @@ function fileSize(): void {
 
 $('fx-colours').innerHTML = FX_COLOURS.map(([v, c]) =>
   `<button data-v="${v}" aria-pressed="${v === 'red'}" title="${v}"><span class="sw" style="background:${c}"></span></button>`).join('');
-seg('fx-colours', v => { fxSet().colour = v; renderFx(0); });
+seg('fx-colours', v => { fxSet().colour = v; tint(); renderFx(0); });
 seg('fx-long', v => { fxSet().long = Number(v); renderFx(0); });
 seg('fx-len', v => { fxSet().frames = Number(v); renderFx(0); });
 seg('fx-scale', v => { fxSet().scale = Number(v); fileSize(); remember(); });
@@ -836,10 +845,9 @@ function setMode(m: Mode): void {
   $('fx-wait').hidden = true;
   $('fx-img').hidden = true;   // the last clip was another style, or another picture
   $<HTMLButtonElement>('fx-gif').disabled = $<HTMLButtonElement>('fx-webp').disabled = true;
-  $('prev-empty').textContent = live ? 'The map plays here' : 'Your clip plays here';
+  tint();
   remember();
   if (live) {
-    if (!st.map) setAccent(look.preset);
     fxs.seq++; // a clip still on its way is no longer wanted
     if (st.map) { $('live-meta').textContent = `${st.map.w} × ${st.map.h} · live`; status('Ready', 'ok'); }
     $('prev-empty').hidden = !!st.map;
@@ -895,7 +903,60 @@ async function drawFx(): Promise<void> {
   $<HTMLButtonElement>('fx-gif').disabled = $<HTMLButtonElement>('fx-webp').disabled = false;
   $('live-meta').textContent = `${fxs.w} × ${fxs.h} dots · ${fxSet().frames} frames`;
   status('Ready', 'ok');
+  if (fresh && narrow.matches) showView('live');   // on a phone, a new picture's first clip comes to the front
+  fresh = false;
   fitFx();
+  void renderThumbs();
+}
+
+// ---- the style tiles: the open picture in each style, small
+
+let thumbKey = '', thumbSeq = 0, fresh = false;
+function clearThumbs(): void {
+  thumbKey = ''; thumbSeq++;
+  for (const s of ['glow', 'streak', 'dust']) $('th-' + s).hidden = true;
+  const c = $<HTMLCanvasElement>('th-live');
+  c.getContext('2d')!.clearRect(0, 0, c.width, c.height);
+}
+async function renderThumbs(): Promise<void> {
+  if (!st.id || !st.view) return;
+  const key = JSON.stringify([st.id, st.view, st.size, fxSets.streak.colour, fxSets.dust.colour, look.preset]);
+  if (key === thumbKey) return;
+  thumbKey = key;
+  const seq = ++thumbSeq;
+  mapThumb();
+  for (const s of ['glow', 'streak', 'dust'] as Style[]) {
+    try {
+      const r = await fetch('/api/fx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        ...params(), style: s, long: s === 'streak' ? 96 : 128, frames: 12, colour: fxSets[s].colour || undefined, format: 'webp', scale: 1, thumb: true }) });
+      if (seq !== thumbSeq) return;
+      if (!r.ok) continue;
+      const img = $<HTMLImageElement>('th-' + s), old = img.src;
+      img.src = URL.createObjectURL(await r.blob());
+      img.hidden = false;
+      if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+    } catch { /* a tile stays empty */ }
+  }
+}
+/** The map's tile: the framed picture as a coarse grid of dots in the palette's colour. */
+function mapThumb(): void {
+  const c = $<HTMLCanvasElement>('th-live'), g2 = c.getContext('2d')!;
+  g2.clearRect(0, 0, c.width, c.height);
+  if (!st.img || !st.view) return;
+  const cols = c.width / 2, rows = c.height / 2, t = document.createElement('canvas');
+  t.width = cols; t.height = rows;
+  const [vx, vy, vw] = st.view, vh = vw * st.size[1] / st.size[0], k = Math.max(cols / vw, rows / vh);
+  const tg = t.getContext('2d')!;
+  tg.drawImage(st.img, (cols - vw * k) / 2 - vx * k, (rows - vh * k) / 2 - vy * k, st.iw * k, st.ih * k);
+  if (st.mask && !st.skip) { tg.globalCompositeOperation = 'destination-in'; tg.drawImage(st.mask, (cols - vw * k) / 2 - vx * k, (rows - vh * k) / 2 - vy * k, st.iw * k, st.ih * k); }
+  let d: Uint8ClampedArray;
+  try { d = tg.getImageData(0, 0, cols, rows).data; } catch { return; }
+  g2.fillStyle = PRESETS[look.preset][1];
+  const bayer = [0.1, 0.6, 0.85, 0.35];
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+    const i = (y * cols + x) * 4, l = (0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]) / 255 * (d[i + 3] / 255);
+    if (l * 1.3 > bayer[(y & 1) * 2 + (x & 1)]) g2.fillRect(x * 2, y * 2, 1.4, 1.4);
+  }
 }
 function fitFx(): void {
   if (!fxs.w) return;
@@ -950,7 +1011,7 @@ function openFile(f: File | undefined): void {
   const rd = new FileReader();
   rd.onload = () => { const data = String(rd.result); void openPicture({ name: f.name, data }, data); };
   rd.readAsDataURL(f);
-  showView('picture');
+  if (narrow.matches) showView('picture');
 }
 $<HTMLInputElement>('file').addEventListener('change', e => { const i = e.target as HTMLInputElement; openFile(i.files?.[0]); i.value = ''; });
 let dragDepth = 0;
@@ -963,14 +1024,16 @@ addEventListener('paste', e => {
   if (f) openFile(f);
 });
 
-// ---- phone: Picture / Live tabs
+// ---- what the stage shows: the picture, the result, or both side by side (not on a phone)
 
-function showView(v: 'picture' | 'live'): void {
-  $('main').classList.toggle('show-live', v === 'live');
+type Stage = 'picture' | 'split' | 'live';
+function showView(v: Stage): void {
+  if (narrow.matches && v === 'split') v = 'picture';
+  $('stage-box').dataset.view = v;
   setSeg('view-tabs', v);
   requestAnimationFrame(() => { layout(); fitPreview(); });
 }
-seg('view-tabs', v => showView(v as 'picture' | 'live'));
+seg('view-tabs', v => showView(v as Stage));
 
 // ---- the preview full screen, the shortcuts sheet, sliders back to their defaults
 
@@ -999,6 +1062,11 @@ addEventListener('keydown', e => {
   const modes: Record<string, Mode> = { 1: 'glow', 2: 'streak', 3: 'dust', 4: 'live' };
   if (modes[e.key]) { setMode(modes[e.key]); e.preventDefault(); return; }
   if (e.key === '?') { help.showModal(); e.preventDefault(); return; }
+  if (e.key.toLowerCase() === 'v' && !e.shiftKey) {
+    const order: Stage[] = narrow.matches ? ['picture', 'live'] : ['picture', 'split', 'live'];
+    showView(order[(order.indexOf($('stage-box').dataset.view as Stage) + 1) % order.length]);
+    e.preventDefault(); return;
+  }
   if (e.shiftKey && e.key.toLowerCase() === 'f') { fullScreen(); e.preventDefault(); return; }
   if (!e.shiftKey && fxs.mode !== 'live' && (e.key === 'g' || e.key === 'w') && !$<HTMLButtonElement>('fx-gif').disabled) { void downloadFx(e.key === 'g' ? 'gif' : 'webp'); e.preventDefault(); return; }
   const tools: Record<string, Tool> = { b: 'box', k: 'keep', r: 'remove', e: 'eyes', f: 'frame' };
@@ -1020,7 +1088,7 @@ async function configure(): Promise<void> {
     server = await (await fetch('/api/config')).json() as typeof server;
   } catch { status('The server is not answering.', 'bad'); return; }
   if (server.public) {
-    $('privacy').textContent = 'or paste one. Up to 16 MB; nothing is stored.';
+    $('privacy').textContent = 'or drop one anywhere, or paste · up to 16 MB, nothing is stored';
   } else {
     $('save-row').hidden = false;
     void listInputs();
@@ -1034,10 +1102,82 @@ async function configure(): Promise<void> {
 }
 
 new ResizeObserver(() => { layout(); fitPreview(); }).observe($('main'));
-narrow.addEventListener('change', () => showView('picture'));
+narrow.addEventListener('change', () => showView(narrow.matches ? 'picture' : 'split'));
+// ---- lettering in dots: the wordmark, the styles' names, and the empty stage
+
+const GLYPHS: Record<string, string> = {   // 5 x 7, rows top to bottom, a bit per dot
+  A: '0e 11 11 1f 11 11 11', C: '0e 11 10 10 10 11 0e', D: '1e 11 11 11 11 11 1e', E: '1f 10 10 1e 10 10 1f', G: '0e 11 10 17 11 11 0f',
+  H: '11 11 11 1f 11 11 11', I: '0e 04 04 04 04 04 0e', K: '11 12 14 18 14 12 11', L: '10 10 10 10 10 10 1f', M: '11 1b 15 15 11 11 11',
+  O: '0e 11 11 11 11 11 0e', P: '1e 11 11 1e 10 10 10', R: '1e 11 11 1e 14 12 11', S: '0f 10 10 0e 01 01 1e', T: '1f 04 04 04 04 04 04',
+  U: '11 11 11 11 11 11 0e', W: '11 11 11 15 15 1b 11', ' ': '00 00 00 00 00 00 00',
+};
+/** Where a line of text lights dots: [column, row] pairs, and how many columns it takes. */
+function dotsOf(text: string): { at: Pt[], cols: number } {
+  const at: Pt[] = [];
+  let x0 = 0;
+  for (const ch of text) {
+    const rows = (GLYPHS[ch] ?? GLYPHS[' ']).split(' ').map(h => parseInt(h, 16));
+    rows.forEach((bits, y) => { for (let x = 0; x < 5; x++) if (bits & (16 >> x)) at.push([x0 + x, y]); });
+    x0 += ch === ' ' ? 4 : 6;
+  }
+  return { at, cols: Math.max(0, x0 - 1) };
+}
+function dm(text: string): string {
+  const { at, cols } = dotsOf(text);
+  return `<svg class="dm" viewBox="0 0 ${cols} 7" role="img" aria-label="${esc(text)}">${at.map(([x, y]) => `<circle cx="${x + 0.5}" cy="${y + 0.5}" r=".42"/>`).join('')}</svg>`;
+}
+$('brand').innerHTML = dm('PHOSPHOR');
+document.querySelectorAll<HTMLElement>('[data-dm]').forEach(el => { el.innerHTML = dm(el.dataset.dm!); });
+
+/** The empty stage: a field of dots spelling out what to do, shimmering as glow does. */
+{
+  const c = $<HTMLCanvasElement>('drop-dots'), x = c.getContext('2d')!, box = $('drop');
+  const INKS = ['#2c72de', '#2c72de', '#2c72de', '#2c72de', '#2c72de', '#2c72de', '#b549c3', '#b549c3', '#ed8d37', '#ed8d37', '#4fc852', '#ffffff'];
+  const hash = (a: number, b: number, t: number): number => { const v = Math.sin(a * 127.1 + b * 311.7 + t * 74.7) * 43758.5453; return v - Math.floor(v); };
+  let tick = 0;
+  const paint = (): void => {
+    if (box.hidden) return;
+    const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    if (r.width < 2) return;
+    if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) { c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); }
+    x.setTransform(dpr, 0, 0, dpr, 0, 0);
+    x.clearRect(0, 0, r.width, r.height);
+    const words = document.body.classList.contains('drag') ? ['LET GO'] : ['DROP A PICTURE'];
+    let lines = words.map(dotsOf);
+    let p = Math.min(13, Math.floor(r.width / (lines[0].cols + 10)));
+    if (p < 6 && words[0] === 'DROP A PICTURE') { lines = ['DROP A', 'PICTURE'].map(dotsOf); p = Math.min(13, Math.floor(r.width / (lines[1].cols + 6))); }
+    p = Math.max(4, p);
+    const cols = Math.ceil(r.width / p), rows = Math.ceil(r.height / p), rad = p * 0.34;
+    const ox = Math.round((r.width - cols * p) / 2) + p / 2, oy = p / 2;
+    const dot = (cx: number, cy: number, ink: string, a: number): void => { x.globalAlpha = a; x.fillStyle = ink; x.beginPath(); x.arc(ox + cx * p, oy + cy * p, rad, 0, 6.2832); x.fill(); };
+    // the dark: a few faint dots, a few of them blinking
+    for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+      const h = hash(cx, cy, 0);
+      if (h < 0.035) dot(cx, cy, '#2c72de', hash(cx, cy, tick >> 2) < 0.3 ? 0.5 : 0.16);
+    }
+    // the words: mostly blue, warm here and there, each dot now and then another colour or out
+    const top = Math.round(rows * 0.42 - (lines.length * 10 - 3) / 2);
+    lines.forEach((ln, i) => {
+      const left = Math.round((cols - ln.cols) / 2);
+      for (const [gx, gy] of ln.at) {
+        const cx = left + gx, cy = top + i * 10 + gy, turn = Math.floor((tick + hash(cx, cy, 1) * 40) / 5);
+        if (hash(cx, cy, turn + 0.5) < 0.05) continue;
+        dot(cx, cy, INKS[Math.floor(hash(cx, cy, turn) * INKS.length)], 1);
+      }
+    });
+    x.globalAlpha = 1;
+  };
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  setInterval(() => { if (!box.hidden && !document.hidden) { if (!still.matches) tick++; paint(); } }, 110);
+  paint();
+  box.addEventListener('click', e => { if (!(e.target as HTMLElement).closest('button')) pick(); });
+  box.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { pick(); e.preventDefault(); } });
+}
+
 const kept = recall();
 setSize(...(kept.size ?? [512, 512]));
 setTool('box');
 setMode(kept.mode ?? 'glow');
+showView(narrow.matches ? 'picture' : 'split');
 status('Ready', 'idle');
 void configure();
