@@ -33,18 +33,14 @@ const esc = (s: string): string => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<
 // ---- status
 
 let busyCount = 0;
+/** The line under the name: errors only. Anything else clears it. */
 function status(text: string, kind: 'idle' | 'ok' | 'bad' = 'ok'): void {
-  $('status-text').textContent = text;
-  const el = $('status');
-  el.classList.toggle('bad', kind === 'bad');
-  el.classList.toggle('ok', kind === 'ok');
-  const m = $('mstatus');
-  m.textContent = text;
-  m.classList.toggle('bad', kind === 'bad');
-  if (kind === 'bad') toast(text, true);
+  $('status-text').textContent = kind === 'bad' ? text : '';
+  $('status').hidden = kind !== 'bad';
+  $('mstatus').textContent = text;
 }
 let toastTimer = 0;
-/** A short note at the bottom of the page: errors, which the header may not have room for. */
+/** A short note at the top of the page: what was just downloaded. */
 function toast(text: string, bad = false): void {
   document.querySelector('.toast')?.remove();
   const t = document.createElement('div');
@@ -74,6 +70,11 @@ const TONE: [keyof typeof toneDefaults, string, number, number, number][] = [
   ['amount', 'Shadow detail', 0, 1, 0.05],
   ['floor', 'Black floor', 0, 0.2, 0.005],
 ];
+const TONE_HINT: Record<string, string> = {
+  lift: 'Lifts the dark parts: lower lights more of them', local: 'Sharpens the difference between neighbouring areas',
+  gamma: 'The middle tones: lower is brighter', white: 'How bright a part must be to count as fully lit',
+  amount: 'How much detail is kept in the shadows', floor: 'Anything darker than this stays unlit',
+};
 const toneDefaults = { lift: 0.6, local: 1.5, gamma: 0.8, white: 99.5, amount: 0.6, floor: 0.03 };
 
 const st = {
@@ -128,7 +129,7 @@ function range(id: string, fmt: (v: number) => string, on: (v: number) => void):
 }
 function paintRange(el: HTMLInputElement): void {
   const min = Number(el.min || 0), max = Number(el.max || 100);
-  el.style.setProperty('--fill', `${((Number(el.value) - min) / (max - min || 1)) * 100}%`);
+  (el.parentElement ?? el).style.setProperty('--fill', `${((Number(el.value) - min) / (max - min || 1)) * 100}%`);
 }
 function setRange(id: string, v: number, text?: string): void {
   const el = $<HTMLInputElement>(id);
@@ -177,6 +178,7 @@ function layout(): void {
     fit = { s, ox: (r.width - bw * s) / 2 - x0 * s, oy: top + (r.height - top - 12 - padB - bh * s) / 2 - y0 * s };
   }
   makeDim();
+  cutThumb();
   draw();
 }
 
@@ -192,6 +194,18 @@ function makeDim(): void {
   x.globalCompositeOperation = 'destination-out';
   x.drawImage(st.mask, 0, 0, c.width, c.height);
   dim = c;
+}
+
+/** The cut-out, small and always in view: the picture with everything outside the figure gone. */
+function cutThumb(): void {
+  const c = $<HTMLCanvasElement>('cut-thumb'), x = c.getContext('2d')!;
+  x.globalCompositeOperation = 'source-over';
+  x.clearRect(0, 0, c.width, c.height);
+  $('cut-note').textContent = st.skip ? 'whole picture' : st.rect || st.strokes.length ? 'by hand' : 'auto';
+  if (!st.img) return;
+  const k = Math.min(c.width / st.iw, c.height / st.ih), w = st.iw * k, h = st.ih * k, ox = (c.width - w) / 2, oy = (c.height - h) / 2;
+  x.drawImage(st.img, ox, oy, w, h);
+  if (st.mask && !st.skip) { x.globalCompositeOperation = 'destination-in'; x.drawImage(st.mask, ox, oy, w, h); }
 }
 
 const toScreen = (x: number, y: number): Pt => [fit.ox + x * fit.s, fit.oy + y * fit.s];
@@ -363,12 +377,11 @@ async function openPicture(body: { name: string; data?: string }, src: string): 
     id: r.id, name: r.name, iw: r.w, ih: r.h, img, mask: null, rect: null, strokes: [], marks: [], hasAlpha: r.hasAlpha, view: null, framed: false,
     map: null, frames: 1,
   });
-  $<HTMLInputElement>('name').value = r.name;
-  fxs.seq++; fxs.w = 0; $('fx-img').hidden = true; // the last picture's clip
+  fxs.seq++; fxs.w = 0; $('fx-img').hidden = true; $('fx-img').classList.remove('rough'); // the last picture's clip
   clearThumbs(); fresh = true;
   setSkip(r.hasAlpha); // a picture with its own transparency is cut out already
   setTool('box');
-  $('file-meta').innerHTML = `<strong>${esc(r.name)}</strong><span>${r.w} × ${r.h}</span>`;
+  $('file-meta').textContent = r.name;
   $('src-meta').textContent = `${r.w} × ${r.h}${r.hasAlpha ? ' · transparent' : ''}`;
   layout();
   await cutout();
@@ -450,18 +463,20 @@ function applyLook(): void {
   ph.palette();
 }
 
+/** Room kept clear round the result for what floats over it: the tiles and downloads at the sides, the name and the strip above and below. */
+const pads = (): Pt => narrow.matches || editing() || document.fullscreenElement ? [24, 24] : [208, 128];
+
 function fitPreview(): void {
   if (fxs.mode !== 'live') { fitFx(); return; }
   if (!st.map || !ph) return;
   const r = $('preview-box').getBoundingClientRect(), W = st.map.w, H = st.map.h;
-  const bar = $('live-bar').getBoundingClientRect().height + 28;
-  const room = Math.min((r.width - 32) / W, (r.height - bar - 32) / H);
+  const [px, py] = pads();
+  const room = Math.min((r.width - px) / W, (r.height - py) / H);
   zoom = room >= 1 ? Math.floor(room) : Math.max(0.1, room); // whole steps keep the dots crisp
   ph.canvas.style.transform = `scale(${zoom})`;
   const stage = $('stage');
   stage.style.width = W * zoom + 'px';
   stage.style.height = H * zoom + 'px';
-  stage.style.marginBottom = bar + 'px';
 }
 
 /** The accent follows the palette: the page takes the preview's colour. */
@@ -472,7 +487,7 @@ function setAccent(p: Preset): void {
 function tint(colour?: string): void {
   const m = fxs.mode;
   const c = colour ?? (m === 'live' ? PRESETS[look.preset][1] : m === 'glow' ? '#5b93f0'
-    : FX_COLOURS.find(([v]) => v === fxSets[m].colour)?.[1] ?? '#5b93f0');
+    : FX_COLOURS.find(([v]) => v === fxSets[m].colour)?.[1] ?? (HEX.test(fxSets[m].colour) ? fxSets[m].colour : '#5b93f0'));
   document.documentElement.style.setProperty('--accent', c);
   document.querySelectorAll<HTMLInputElement>('input[type=range]').forEach(paintRange);
   draw();
@@ -546,8 +561,8 @@ $('auto-frame').addEventListener('click', () => void autoFrame());
 // tone
 const toneEl = $('tone');
 toneEl.innerHTML = TONE.map(([k, label, min, max, step]) =>
-  `<div class="range"><label for="t-${k}">${label}</label><output id="t-${k}-out"></output><input type="range" id="t-${k}" min="${min}" max="${max}" step="${step}" value="${toneDefaults[k]}"></div>`).join('');
-const fmtTone = (v: number): string => String(Math.round(v * 1000) / 1000);
+  `<div class="range" title="${TONE_HINT[k]}"><label for="t-${k}">${label}</label><span class="sl"><input type="range" id="t-${k}" min="${min}" max="${max}" step="${step}" value="${toneDefaults[k]}"></span><output id="t-${k}-out"></output></div>`).join('');
+function fmtTone(v: number): string { return String(Math.round(v * 1000) / 1000); }
 for (const [k] of TONE) range(`t-${k}`, fmtTone, v => { st.tone[k] = v; rebuild(); });
 $('reset-tone').addEventListener('click', () => {
   st.tone = { ...toneDefaults };
@@ -576,10 +591,10 @@ function exportSummary(): void {
 
 $('export').addEventListener('click', async () => {
   if (!st.id) return;
-  const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
+  const name = st.name.replace(/[^A-Za-z0-9_.-]+/g, '-');
   const body = {
     ...params(), name, colours: picked('ex-colours'), backgrounds: picked('ex-bgs'),
-    dots: picked('ex-dots').map(Number), scale, save: !server.public && $<HTMLInputElement>('save').checked,
+    dots: picked('ex-dots').map(Number), scale, save: false,
   };
   await task('Exporting…', async () => {
     const r = await fetch('/api/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -615,33 +630,110 @@ const FX: Record<Style, { long: number[], len: [number, string][], scale: number
 };
 // which way the dust drifts: a dial (degrees, 0 right, 90 down); auto drifts across, away from the lit side
 const fxSets: Record<Style, FxSet> = { glow: { ...FX.glow.d }, streak: { ...FX.streak.d }, dust: { ...FX.dust.d } };
-const fxs = { mode: 'glow' as Mode, url: '', seq: 0, w: 0, h: 0, bytes: 0 };
+const fxs = { mode: 'glow' as Mode, url: '', seq: 0, sharp: 0, w: 0, h: 0, bytes: 0 };
 
 // what was chosen last time: the style, each style's settings, the shape
 const KEEP = 'phosphor.ui.1';
 function remember(): void {
   try { localStorage.setItem(KEEP, JSON.stringify({ mode: fxs.mode, sets: fxSets, size: sizes.clip, mapSize: sizes.map })); } catch { /* private window: nothing kept */ }
 }
-function recall(): { mode?: Mode, size?: Pt, mapSize?: Pt } {
-  try {
-    const k = JSON.parse(localStorage.getItem(KEEP) || '{}') as { mode?: Mode, sets?: Partial<Record<Style, Partial<FxSet>>>, size?: Pt, mapSize?: Pt };
-    for (const s of ['glow', 'streak', 'dust'] as Style[]) {
-      const got = k.sets?.[s];
-      if (!got) continue;
-      const o = FX[s], d = fxSets[s];
-      if (o.long.includes(got.long!)) d.long = got.long!;
-      if (o.len.some(([v]) => v === got.frames)) d.frames = got.frames!;
-      if (o.scale.includes(got.scale!)) d.scale = got.scale!;
-      if (typeof got.colour === 'string' && (s === 'glow' || FX_COLOURS.some(([v]) => v === got.colour))) d.colour = got.colour;
-      if (got.angle === null || typeof got.angle === 'number') d.angle = got.angle;
-      if (typeof got.streaks === 'boolean') d.streaks = got.streaks;
-      for (const t of ['exposure', 'highlights', 'warmth'] as const) if (typeof got[t] === 'number' && Math.abs(got[t]!) <= 100) d[t] = got[t]!;
-    }
-    const mode = ['glow', 'streak', 'dust', 'live'].includes(k.mode!) ? k.mode : undefined;
-    const pair = (v?: Pt): Pt | undefined => Array.isArray(v) && v.length === 2 && v.every(n => Number.isFinite(n)) ? v : undefined;
-    return { mode, size: pair(k.size), mapSize: pair(k.mapSize) };
-  } catch { return {}; }
+const HEX = /^#[0-9a-f]{6}$/i;
+type Kept = { mode?: Mode, sets?: Partial<Record<Style, Partial<FxSet>>>, size?: Pt, mapSize?: Pt, map?: MapSnap };
+type MapSnap = { tone?: Partial<typeof toneDefaults>, look?: Partial<typeof look> };
+/** Takes what is valid of a style's settings from `got` (kept, a preset, a link) into that style's own. */
+function takeSet(s: Style, got?: Partial<FxSet>): void {
+  if (!got || typeof got !== 'object') return;
+  const o = FX[s], d = fxSets[s];
+  if (o.long.includes(got.long!)) d.long = got.long!;
+  if (o.len.some(([v]) => v === got.frames)) d.frames = got.frames!;
+  if (o.scale.includes(got.scale!)) d.scale = got.scale!;
+  if (typeof got.colour === 'string' && (s === 'glow' || HEX.test(got.colour) || FX_COLOURS.some(([v]) => v === got.colour))) d.colour = got.colour;
+  if (got.angle === null || typeof got.angle === 'number') d.angle = got.angle;
+  if (typeof got.streaks === 'boolean') d.streaks = got.streaks;
+  for (const t of ['exposure', 'highlights', 'warmth'] as const) if (typeof got[t] === 'number' && Math.abs(got[t]!) <= 100) d[t] = got[t]!;
 }
+/** The same for the map: its tone, and the look of its preview; the controls follow. */
+function takeMap(got?: MapSnap): void {
+  if (!got || typeof got !== 'object') return;
+  for (const [k, , min, max] of TONE) {
+    const v = got.tone?.[k];
+    if (typeof v === 'number' && v >= min && v <= max) { st.tone[k] = v; setRange(`t-${k}`, v, fmtTone(v)); }
+  }
+  const l = got.look;
+  if (l) {
+    if (typeof l.preset === 'string' && l.preset in PRESETS) look.preset = l.preset;
+    if (l.dot === 1 || l.dot === 2) look.dot = l.dot;
+    if (typeof l.full === 'boolean') look.full = l.full;
+    if (['off', 'left', 'right', 'all'].includes(l.particles!)) look.particles = l.particles!;
+  }
+  setSeg('presets', look.preset); setSeg('dot', String(look.dot)); setSeg('parts', look.particles); pressed($('full'), look.full);
+  applyLook();
+}
+const mapSnap = (): MapSnap => ({ tone: { ...st.tone }, look: { ...look } });
+function takeAll(k: Kept): { mode?: Mode, size?: Pt, mapSize?: Pt } {
+  for (const s of ['glow', 'streak', 'dust'] as Style[]) takeSet(s, k.sets?.[s]);
+  takeMap(k.map);
+  const mode = ['glow', 'streak', 'dust', 'live'].includes(k.mode!) ? k.mode : undefined;
+  const pair = (v?: Pt): Pt | undefined => Array.isArray(v) && v.length === 2 && v.every(n => Number.isFinite(n)) ? v : undefined;
+  return { mode, size: pair(k.size), mapSize: pair(k.mapSize) };
+}
+function recall(): { mode?: Mode, size?: Pt, mapSize?: Pt } {
+  try { return takeAll(JSON.parse(localStorage.getItem(KEEP) || '{}') as Kept); } catch { return {}; }
+}
+
+// ---- a link that carries the settings (not the picture): the style in hand, its settings, the shape
+
+function shareLink(): string {
+  const m = fxs.mode, k: Kept = m === 'live' ? { mode: m, mapSize: sizes.map, map: mapSnap() } : { mode: m, size: sizes.clip, sets: { [m]: { ...fxSet(), focus: null } } };
+  return `${location.origin}${location.pathname}#s=${btoa(JSON.stringify(k)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+}
+/** Settings from a link the page was opened with, if any; the link is then cleared from the address. */
+function fromLink(): { mode?: Mode, size?: Pt, mapSize?: Pt } {
+  const m = /^#s=([A-Za-z0-9_-]+)$/.exec(location.hash);
+  if (!m) return {};
+  history.replaceState(null, '', location.pathname);
+  try { return takeAll(JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/'))) as Kept); } catch { return {}; }
+}
+$('share').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(shareLink()); toast('Link copied · it carries the settings, not the picture'); }
+  catch { status('Could not reach the clipboard.', 'bad'); }
+});
+
+// ---- presets: a style's settings under a name, kept in this browser; each style has its own list
+
+const PRE = 'phosphor.presets.1';
+type Pre = Partial<Record<Mode, Record<string, Partial<FxSet> | MapSnap>>>;
+function presets(): Pre { try { return JSON.parse(localStorage.getItem(PRE) || '{}') as Pre; } catch { return {}; } }
+function showPresets(): void {
+  const names = Object.keys(presets()[fxs.mode] ?? {});
+  $('pre-list').innerHTML = names.map(n => `<span class="pre"><button class="chip" data-v="${esc(n)}" title="Use ${esc(n)}">${esc(n)}</button><button class="chip" data-x="${esc(n)}" title="Remove ${esc(n)}" aria-label="Remove ${esc(n)}">×</button></span>`).join('');
+}
+function savePreset(): void {
+  const el = $<HTMLInputElement>('pre-name'), name = el.value.trim().slice(0, 24);
+  if (!name) { el.focus(); return; }
+  const all = presets(), m = fxs.mode;
+  (all[m] ??= {})[name] = m === 'live' ? mapSnap() : { ...fxSet(), focus: null };
+  try { localStorage.setItem(PRE, JSON.stringify(all)); } catch { status('This browser is not keeping anything (a private window?).', 'bad'); return; }
+  el.value = '';
+  showPresets();
+  toast(`Saved ${name}`);
+}
+$('pre-save').addEventListener('click', savePreset);
+$('pre-name').addEventListener('keydown', e => { if (e.key === 'Enter') savePreset(); });
+$('pre-list').addEventListener('click', e => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('button');
+  if (!b) return;
+  const all = presets(), m = fxs.mode, mine = all[m] ?? {};
+  if (b.dataset.x !== undefined) {
+    delete mine[b.dataset.x];
+    try { localStorage.setItem(PRE, JSON.stringify(all)); } catch { /* nothing kept */ }
+    showPresets();
+  } else if (b.dataset.v !== undefined && mine[b.dataset.v]) {
+    if (m === 'live') { takeMap(mine[b.dataset.v] as MapSnap); rebuild(0); }
+    else { fxSet().focus = null; takeSet(m, mine[b.dataset.v] as Partial<FxSet>); setPickFocus(false); fxButtons(); tint(); renderFx(0); }
+  }
+});
+
 const fxSet = (): FxSet => fxSets[fxs.mode === 'live' ? 'glow' : fxs.mode];
 let fxTimer = 0;
 
@@ -657,20 +749,36 @@ function fxButtons(): void {
   for (const k of TUNE_KEYS) { const el = $<HTMLInputElement>('tu-' + k); el.value = String(c[k]); paintRange(el); $('tu-' + k + '-out').textContent = tuneText(c[k]); }
   placeFocus();
   setSeg('fx-colours', c.colour);
+  showOwn();
   $<HTMLInputElement>('fx-streaks').checked = c.streaks !== false;
   fileSize();
 }
 /** What the downloaded clip will measure. */
 function fileSize(): void {
+  const c = fxSet(), [w, h] = clipDots();
+  $('fx-size').textContent = `${w * c.scale} × ${h * c.scale} px · ${+(c.frames / 24).toFixed(1)} s`;
+}
+/** The clip's size in dots, as the server will make it. */
+function clipDots(): Pt {
   const c = fxSet(), [W, H] = st.size, k = c.long / Math.max(W, H);
   const rnd = (x: number): number => { const f = Math.floor(x), d = x - f; return d > 0.5 || (d === 0.5 && f % 2 === 1) ? f + 1 : f; };
-  const w = Math.max(8, rnd(W * k)) * c.scale, h = Math.max(8, rnd(H * k)) * c.scale;
-  $('fx-size').textContent = `${w} × ${h} px · ${+(c.frames / 24).toFixed(1)} s`;
+  return [Math.max(8, rnd(W * k)), Math.max(8, rnd(H * k))];
 }
 
 $('fx-colours').innerHTML = FX_COLOURS.map(([v, c]) =>
   `<button data-v="${v}" aria-pressed="${v === 'red'}" title="${v}"><span class="sw" style="background:${c}"></span></button>`).join('');
-seg('fx-colours', v => { fxSet().colour = v; tint(); renderFx(0); });
+seg('fx-colours', v => { fxSet().colour = v; showOwn(); tint(); renderFx(0); });
+/** The "own" box: lit, and showing the colour, when the style's colour is one of your own. */
+function showOwn(): void {
+  const c = fxSet().colour, own = HEX.test(c), l = $('fx-own-l');
+  l.classList.toggle('on', own);
+  if (own) { l.style.setProperty('--own', c); $<HTMLInputElement>('fx-own').value = c.toLowerCase(); } else l.style.removeProperty('--own');
+}
+$<HTMLInputElement>('fx-own').addEventListener('input', e => {
+  if (fxs.mode === 'live' || fxs.mode === 'glow') return;
+  fxSet().colour = (e.target as HTMLInputElement).value;
+  setSeg('fx-colours', ''); showOwn(); tint(); renderFx();
+});
 seg('fx-long', v => { fxSet().long = Number(v); renderFx(0); });
 seg('fx-len', v => { fxSet().frames = Number(v); renderFx(0); });
 seg('fx-scale', v => { fxSet().scale = Number(v); fileSize(); remember(); });
@@ -682,11 +790,15 @@ $('tu-reset').addEventListener('click', () => {
   if (fxs.mode === 'live') return;
   const d = FX[fxs.mode].d;
   Object.assign(fxSet(), TUNE0, { streaks: d.streaks, angle: d.angle }); setPickFocus(false); fxButtons(); renderFx(0); });
-$('tu-focus').addEventListener('click', () => setPickFocus(!$('fx-img').classList.contains('picking')));
+$('tu-focus').addEventListener('click', () => {
+  const on = !$('fx-img').classList.contains('picking');
+  setPickFocus(on);
+  if (on) openGroup('');   // out of the way of the clip
+});
 function setPickFocus(on: boolean): void {
   $('fx-img').classList.toggle('picking', on);
   pressed($('tu-focus'), on || fxSet().focus !== null);
-  $('tu-focus').textContent = on ? 'Click the clip…' : fxSet().focus ? 'Move light source' : 'Set light source';
+  $('tu-focus').textContent = on ? 'Click the clip…' : fxSet().focus ? 'Move' : 'Pick on clip';
 }
 $('fx-img').addEventListener('click', e => {
   const img = $<HTMLImageElement>('fx-img');
@@ -747,17 +859,19 @@ function setMode(m: Mode): void {
   document.body.dataset.mode = m;
   const live = m === 'live';
   if (ph) ph.canvas.hidden = !live;
-  $('live-bar').classList.toggle('off', !live || !st.map);
   $('fx-colours-row').hidden = live || m === 'glow';
   $('fx-angle').hidden = m !== 'dust';   // only dust has a direction
   $('fx-streaks-row').hidden = m !== 'glow';
   $('tu-warmth-l').hidden = m !== 'glow';
   $('tu-focus').hidden = m !== 'glow';
+  if (m === 'glow') openGroup(document.querySelector('.grp.open[data-g=palette]') ? '' : undefined);   // glow has no palette yet
   setPickFocus(false);
   fxButtons();
   $('fx-wait').hidden = true;
   $('fx-img').hidden = true;   // the last clip was another style, or another picture
-  $<HTMLButtonElement>('fx-gif').disabled = $<HTMLButtonElement>('fx-webp').disabled = true;
+  $('fx-img').classList.remove('rough');
+  clipButtons(false);
+  showPresets();
   tint();
   remember();
   if (live) {
@@ -772,20 +886,20 @@ function setMode(m: Mode): void {
   }
 }
 
-function fxBody(format: string, scale: number, save: boolean): object {
-  const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
+function fxBody(format: string, scale: number): object {
+  const name = st.name.replace(/[^A-Za-z0-9_.-]+/g, '-');
   return { ...params(), style: fxs.mode, long: fxSet().long, frames: fxSet().frames, angle: fxs.mode === 'dust' ? fxSet().angle ?? undefined : undefined,
     colour: fxSet().colour || undefined,
     streaks: fxs.mode === 'glow' ? fxSet().streaks !== false : undefined, tune: tuneBody(), format, scale, name,
-    save: save && !server.public && $<HTMLInputElement>('save').checked };
+    save: false };
 }
 function tuneBody(): object {
   const c = fxSet(), glow = fxs.mode === 'glow';
   return { exposure: tuneF(c.exposure), highlights: tuneF(c.highlights), warmth: glow ? tuneF(c.warmth) : undefined,
     focus: glow && c.focus ? c.focus : undefined };
 }
-async function fxFetch(format: string, scale: number, save = false): Promise<Response> {
-  const r = await fetch('/api/fx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fxBody(format, scale, save)) });
+async function fxFetch(format: string, scale: number): Promise<Response> {
+  const r = await fetch('/api/fx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fxBody(format, scale)) });
   if (!r.ok) throw new Error(await errorOf(r));
   return r;
 }
@@ -796,30 +910,61 @@ function renderFx(ms = 600): void {
   if (fxs.mode === 'live' || !st.id || !st.view) return;
   fxTimer = window.setTimeout(() => { void drawFx(); }, ms);
 }
-async function drawFx(): Promise<void> {
-  const seq = ++fxs.seq, mode = fxs.mode;
-  const wait = $('fx-wait');
-  wait.classList.toggle('over', !$('fx-img').hidden);
-  wait.hidden = false;
-  const blob = await task(`Rendering ${mode}…`, async () => (await fxFetch('webp', 1)).blob());
-  if (seq !== fxs.seq) return;
-  wait.hidden = true;
-  if (!blob) return;
+/** The clip's buttons: on once there is a clip to download. Copy needs a browser that can put a picture on the clipboard. */
+function clipButtons(on: boolean): void {
+  for (const id of ['fx-gif', 'fx-webp', 'fx-png', 'fx-copy']) $<HTMLButtonElement>(id).disabled = !on;
+  $('fx-copy').hidden = !(navigator.clipboard && 'ClipboardItem' in window);
+}
+/** Puts a clip on the stage, as `w` × `h` dots. */
+async function showFx(blob: Blob, w: number, h: number): Promise<void> {
   const url = URL.createObjectURL(blob), img = $<HTMLImageElement>('fx-img');
   await new Promise<void>(ok => { img.onload = () => ok(); img.onerror = () => ok(); img.src = url; });
   if (fxs.url) URL.revokeObjectURL(fxs.url);
   fxs.url = url;
-  fxs.w = img.naturalWidth; fxs.h = img.naturalHeight; fxs.bytes = blob.size;
+  fxs.w = w || img.naturalWidth; fxs.h = h || img.naturalHeight;
   img.hidden = fxs.mode === 'live';
   $('prev-empty').hidden = true;
-  $<HTMLButtonElement>('fx-gif').disabled = $<HTMLButtonElement>('fx-webp').disabled = false;
+  fitFx();
+}
+/** While the clip renders: a small, short one, drawn at once and shown half resolved in its place. */
+async function roughFx(seq: number): Promise<void> {
+  try {
+    const [w, h] = clipDots();
+    const r = await fetch('/api/fx', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      ...fxBody('webp', 1), long: Math.max(64, Math.round(fxSet().long / 3)), frames: 8, thumb: true }) });
+    if (!r.ok || seq !== fxs.seq || fxs.sharp >= seq) return;
+    const blob = await r.blob();
+    if (seq !== fxs.seq || fxs.sharp >= seq) return;
+    $('fx-img').classList.remove('resolve');
+    $('fx-img').classList.add('rough');
+    await showFx(blob, w, h);
+    $('fx-wait').classList.add('over');
+  } catch { /* the real one is on its way */ }
+}
+async function drawFx(): Promise<void> {
+  const seq = ++fxs.seq, mode = fxs.mode;
+  const wait = $('fx-wait'), img = $<HTMLImageElement>('fx-img');
+  wait.classList.toggle('over', !img.hidden);
+  wait.hidden = false;
+  void roughFx(seq);
+  const blob = await task(`Rendering ${mode}…`, async () => (await fxFetch('webp', 1)).blob());
+  if (seq !== fxs.seq) return;
+  fxs.sharp = seq;
+  wait.hidden = true;
+  if (!blob) { img.classList.remove('rough'); return; }
+  await showFx(blob, 0, 0);
+  if (seq !== fxs.seq) return;
+  img.classList.remove('rough');
+  img.classList.remove('resolve'); void img.offsetWidth; img.classList.add('resolve');   // out of dots, afresh each time
+  fxs.bytes = blob.size;
+  clipButtons(true);
   $('live-meta').textContent = `${fxs.w} × ${fxs.h} dots · ${fxSet().frames} frames`;
   status('Ready', 'ok');
   if (fresh && narrow.matches) showView('live');   // on a phone, a new picture's first clip comes to the front
   fresh = false;
-  fitFx();
   void renderThumbs();
 }
+$('fx-img').addEventListener('animationend', () => $('fx-img').classList.remove('resolve'));
 
 // ---- the style tiles: the open picture in each style, small
 
@@ -873,16 +1018,17 @@ function mapThumb(): void {
 function fitFx(): void {
   if (!fxs.w) return;
   const r = $('preview-box').getBoundingClientRect(), img = $<HTMLImageElement>('fx-img');
-  const room = Math.min((r.width - 32) / fxs.w, (r.height - 32) / fxs.h);
+  const [px, py] = pads();
+  const room = Math.min((r.width - px) / fxs.w, (r.height - py) / fxs.h);
   const z = room >= 1 ? Math.floor(room * 2) / 2 : Math.max(0.1, room);   // half steps: a coarse clip still fills the pane
   img.style.width = fxs.w * z + 'px';
   img.style.height = fxs.h * z + 'px';
   placeFocus();
 }
-async function downloadFx(format: 'gif' | 'webp'): Promise<void> {
+async function downloadFx(format: 'gif' | 'webp' | 'png'): Promise<void> {
   if (!st.id || fxs.mode === 'live') return;
   await task(`Making the ${format.toUpperCase()}…`, async () => {
-    const r = await fxFetch(format, fxSet().scale, true);
+    const r = await fxFetch(format, fxSet().scale);
     const blob = await r.blob(), a = document.createElement('a');
     const name = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '')?.[1] || `clip.${format}`;
     a.href = URL.createObjectURL(blob);
@@ -897,25 +1043,23 @@ async function downloadFx(format: 'gif' | 'webp'): Promise<void> {
 }
 $('fx-gif').addEventListener('click', () => void downloadFx('gif'));
 $('fx-webp').addEventListener('click', () => void downloadFx('webp'));
+$('fx-png').addEventListener('click', () => void downloadFx('png'));
+/** The still (the clip's first frame) onto the clipboard, as a PNG. */
+async function copyFx(): Promise<void> {
+  if (!st.id || fxs.mode === 'live') return;
+  await task('Copying…', async () => {
+    const png = fxFetch('png', fxSet().scale).then(r => r.blob());
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);   // the promise goes in, so the click still counts as the user's
+    status('Ready', 'ok');
+    toast('Still copied');
+  });
+}
+$('fx-copy').addEventListener('click', () => void copyFx());
 
 // ---- opening pictures
 
-async function listInputs(): Promise<void> {
-  try {
-    const names = await (await fetch('/api/inputs')).json() as string[];
-    const sel = $<HTMLSelectElement>('inputs');
-    sel.hidden = !names.length;
-    sel.innerHTML = '<option value="">From in/</option>' + names.map(n => `<option>${esc(n)}</option>`).join('');
-  } catch { /* the first call will say the server is down */ }
-}
-$<HTMLSelectElement>('inputs').addEventListener('change', e => {
-  const sel = e.target as HTMLSelectElement, n = sel.value;
-  sel.value = '';
-  if (n) void openPicture({ name: n }, '/in/' + encodeURIComponent(n));
-});
 const pick = (): void => $<HTMLInputElement>('file').click();
 $('open').addEventListener('click', pick);
-$('open-2').addEventListener('click', pick);
 function openFile(f: File | undefined): void {
   if (!f) return;
   if (!/^image\/(png|jpeg|webp|gif|bmp)$/.test(f.type)) { status('That isn’t a PNG, JPEG, WebP, GIF or BMP.', 'bad'); return; }
@@ -944,10 +1088,29 @@ function showView(v: Stage): void {
   $('stage-box').dataset.view = v;
   const b = $('edit-btn');
   pressed(b, v !== 'live');
-  b.textContent = v === 'live' ? 'Crop & cut-out' : 'Done';
+  b.innerHTML = `<kbd>V</kbd> ${v === 'live' ? 'Cut-out' : 'Done'}`;
+  document.body.classList.toggle('editing', v !== 'live');
   requestAnimationFrame(() => { layout(); fitPreview(); });
 }
 $('edit-btn').addEventListener('click', () => showView(editing() ? 'live' : 'split'));
+$('cut').addEventListener('click', () => showView('split'));
+
+// ---- the groups along the bottom: one open at a time, as a card above the strip
+
+/** Open the named group, or close it if it is open already; '' closes whichever is open; undefined leaves things be. */
+function openGroup(name?: string): void {
+  if (name === undefined) return;
+  document.querySelectorAll<HTMLElement>('.grp').forEach(el => {
+    const on = el.dataset.g === name && !el.classList.contains('open');
+    el.classList.toggle('open', on);
+    el.querySelector('button')!.setAttribute('aria-expanded', String(on));
+  });
+  requestAnimationFrame(placeFocus);
+}
+$('groups').addEventListener('click', e => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('.grp > button');
+  if (b) openGroup(b.parentElement!.dataset.g);
+});
 
 // ---- the preview full screen, the shortcuts sheet, sliders back to their defaults
 
@@ -981,7 +1144,10 @@ addEventListener('keydown', e => {
     e.preventDefault(); return;
   }
   if (e.shiftKey && e.key.toLowerCase() === 'f') { fullScreen(); e.preventDefault(); return; }
-  if (!e.shiftKey && fxs.mode !== 'live' && (e.key === 'g' || e.key === 'w') && !$<HTMLButtonElement>('fx-gif').disabled) { void downloadFx(e.key === 'g' ? 'gif' : 'webp'); e.preventDefault(); return; }
+  if (!e.shiftKey && fxs.mode !== 'live' && 'gwpc'.includes(e.key) && e.key.length === 1 && !$<HTMLButtonElement>('fx-gif').disabled) {
+    if (e.key === 'c') void copyFx(); else void downloadFx(({ g: 'gif', w: 'webp', p: 'png' } as const)[e.key as 'g' | 'w' | 'p']);
+    e.preventDefault(); return;
+  }
   const tools: Record<string, Tool> = { b: 'box', k: 'keep', r: 'remove', f: 'frame' };
   const k = e.key.toLowerCase();
   if (tools[k] && st.img) { if (!editing()) showView('split'); setTool(tools[k]); e.preventDefault(); }
@@ -989,6 +1155,7 @@ addEventListener('keydown', e => {
   else if (k === 'escape') {   // out of whatever is in hand: picking the light source, then the editor
     if ($('fx-img').classList.contains('picking')) setPickFocus(false);
     else if (editing()) showView('live');
+    else openGroup('');
   }
   else if ((k === '[' || k === ']') && st.img) {
     st.brush = Math.max(4, Math.min(80, st.brush + (k === ']' ? 4 : -4)));
@@ -1004,12 +1171,6 @@ async function configure(): Promise<void> {
   try {
     server = await (await fetch('/api/config')).json() as typeof server;
   } catch { status('The server is not answering.', 'bad'); return; }
-  if (server.public) {
-    $('privacy').textContent = 'or drop one anywhere, or paste · up to 16 MB, nothing is stored';
-  } else {
-    $('save-row').hidden = false;
-    void listInputs();
-  }
   for (const id of ['w', 'h']) $<HTMLInputElement>(id).max = String(server.maxSize);
   document.querySelectorAll<HTMLElement>('#sizes .chip, #shapes .chip').forEach(c => {
     const [W, H] = c.dataset.v!.split('x').map(Number);
@@ -1020,10 +1181,10 @@ async function configure(): Promise<void> {
 
 new ResizeObserver(() => { layout(); fitPreview(); }).observe($('main'));
 narrow.addEventListener('change', () => showView(editing() ? 'split' : 'live'));
-// ---- lettering in dots: the wordmark, the styles' names, and the empty stage
+// ---- lettering in dots: the wordmark, and the empty stage
 
 const GLYPHS: Record<string, string> = {   // 5 x 7, rows top to bottom, a bit per dot
-  A: '0e 11 11 1f 11 11 11', C: '0e 11 10 10 10 11 0e', D: '1e 11 11 11 11 11 1e', E: '1f 10 10 1e 10 10 1f', G: '0e 11 10 17 11 11 0f',
+  A: '0e 11 11 1f 11 11 11', N: '11 19 15 13 11 11 11', C: '0e 11 10 10 10 11 0e', D: '1e 11 11 11 11 11 1e', E: '1f 10 10 1e 10 10 1f', G: '0e 11 10 17 11 11 0f',
   H: '11 11 11 1f 11 11 11', I: '0e 04 04 04 04 04 0e', K: '11 12 14 18 14 12 11', L: '10 10 10 10 10 10 1f', M: '11 1b 15 15 11 11 11',
   O: '0e 11 11 11 11 11 0e', P: '1e 11 11 1e 10 10 10', R: '1e 11 11 1e 14 12 11', S: '0f 10 10 0e 01 01 1e', T: '1f 04 04 04 04 04 04',
   U: '11 11 11 11 11 11 0e', W: '11 11 11 15 15 1b 11', ' ': '00 00 00 00 00 00 00',
@@ -1046,52 +1207,16 @@ function dm(text: string): string {
 $('brand').innerHTML = dm('PHOSPHOR');
 document.querySelectorAll<HTMLElement>('[data-dm]').forEach(el => { el.innerHTML = dm(el.dataset.dm!); });
 
-/** The empty stage: a field of dots spelling out what to do, shimmering as glow does. */
+/** The empty stage: it says there is no picture, in dots; a click anywhere on it opens the file dialog. */
 {
-  const c = $<HTMLCanvasElement>('drop-dots'), x = c.getContext('2d')!, box = $('drop');
-  const INKS = ['#2c72de', '#2c72de', '#2c72de', '#2c72de', '#2c72de', '#2c72de', '#b549c3', '#b549c3', '#ed8d37', '#ed8d37', '#4fc852', '#ffffff'];
-  const hash = (a: number, b: number, t: number): number => { const v = Math.sin(a * 127.1 + b * 311.7 + t * 74.7) * 43758.5453; return v - Math.floor(v); };
-  let tick = 0;
-  const paint = (): void => {
-    if (box.hidden) return;
-    const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-    if (r.width < 2) return;
-    if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) { c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); }
-    x.setTransform(dpr, 0, 0, dpr, 0, 0);
-    x.clearRect(0, 0, r.width, r.height);
-    const words = document.body.classList.contains('drag') ? ['LET GO'] : ['DROP A PICTURE'];
-    let lines = words.map(dotsOf);
-    let p = Math.min(13, Math.floor(r.width / (lines[0].cols + 10)));
-    if (p < 6 && words[0] === 'DROP A PICTURE') { lines = ['DROP A', 'PICTURE'].map(dotsOf); p = Math.min(13, Math.floor(r.width / (lines[1].cols + 6))); }
-    p = Math.max(4, p);
-    const cols = Math.ceil(r.width / p), rows = Math.ceil(r.height / p), rad = p * 0.34;
-    const ox = Math.round((r.width - cols * p) / 2) + p / 2, oy = p / 2;
-    const dot = (cx: number, cy: number, ink: string, a: number): void => { x.globalAlpha = a; x.fillStyle = ink; x.beginPath(); x.arc(ox + cx * p, oy + cy * p, rad, 0, 6.2832); x.fill(); };
-    // the dark: a few faint dots, a few of them blinking
-    for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
-      const h = hash(cx, cy, 0);
-      if (h < 0.035) dot(cx, cy, '#2c72de', hash(cx, cy, tick >> 2) < 0.3 ? 0.5 : 0.16);
-    }
-    // the words: mostly blue, warm here and there, each dot now and then another colour or out
-    const top = Math.round(rows * 0.42 - (lines.length * 10 - 3) / 2);
-    lines.forEach((ln, i) => {
-      const left = Math.round((cols - ln.cols) / 2);
-      for (const [gx, gy] of ln.at) {
-        const cx = left + gx, cy = top + i * 10 + gy, turn = Math.floor((tick + hash(cx, cy, 1) * 40) / 5);
-        if (hash(cx, cy, turn + 0.5) < 0.05) continue;
-        dot(cx, cy, INKS[Math.floor(hash(cx, cy, turn) * INKS.length)], 1);
-      }
-    });
-    x.globalAlpha = 1;
-  };
-  const still = matchMedia('(prefers-reduced-motion: reduce)');
-  setInterval(() => { if (!box.hidden && !document.hidden) { if (!still.matches) tick++; paint(); } }, 110);
-  paint();
-  box.addEventListener('click', e => { if (!(e.target as HTMLElement).closest('button')) pick(); });
+  const box = $('drop');
+  $('drop-big').innerHTML = dm('NO') + dm('PICTURE');
+  box.addEventListener('click', pick);
   box.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { pick(); e.preventDefault(); } });
 }
 
 const kept = recall();
+for (const [k, v] of Object.entries(fromLink())) if (v !== undefined) (kept as Record<string, unknown>)[k] = v;   // a link wins over what was kept
 if (kept.mapSize) sizes.map = kept.mapSize;
 setSize(...(kept.size ?? [512, 512]));
 setTool('box');

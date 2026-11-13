@@ -9,220 +9,204 @@
 <title>Phosphor</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23000'/%3E%3Cg fill='%235b93f0'%3E%3Ccircle cx='4' cy='4' r='1.4'/%3E%3Ccircle cx='8' cy='4' r='1.4'/%3E%3Ccircle cx='12' cy='8' r='1.4'/%3E%3Ccircle cx='4' cy='8' r='1.4'/%3E%3Ccircle cx='8' cy='8' r='1.4'/%3E%3Ccircle cx='4' cy='12' r='1.4'/%3E%3C/g%3E%3C/svg%3E">
 <style>
+  /* IBM Plex Mono (SIL Open Font License: fonts/OFL.txt), served from here: no outside requests */
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap; src: url(fonts/plex-mono-400.woff2) format("woff2"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 700; font-display: swap; src: url(fonts/plex-mono-700.woff2) format("woff2"); }
   :root {
-    --bg: #000;
-    --ink: #ece9e2;                          /* a warm white, as lit phosphor */
-    --mute: #8d8a83;
-    --faint: #57554f;
-    --line: rgba(236, 233, 226, .09);
-    --line-2: rgba(236, 233, 226, .2);
+    --bg: #050505;
+    --ink: #ffb000;                          /* amber, as an old terminal */
+    --mute: #94690f;
+    --faint: #5e440c;
+    --line: #2b2007;
+    --line-2: #4d380a;
     --accent: #5b93f0;                       /* follows the style: glow blue, streak's and dust's own colour */
     --accent-dim: color-mix(in srgb, var(--accent) 14%, transparent);
     --accent-line: color-mix(in srgb, var(--accent) 60%, transparent);
-    --bad: #ff6a5e;
-    --keep: #5fd890;
-    --cut: #f07a8c;
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
-    --sans: "Inter", "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", sans-serif;
-    --side: 324px;
+    --bad: #ff4a3d;
+    --mono: "IBM Plex Mono", "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --dots: radial-gradient(circle, currentColor 0 1px, transparent 1.3px);
+    --glass: rgba(5, 5, 5, .9);
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
-  body { display: grid; grid-template-rows: 48px minmax(0, 1fr); overflow: hidden; }
-  button, input, select { font: inherit; color: inherit; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 11px/1.35 var(--mono); letter-spacing: .04em; text-transform: uppercase; -webkit-font-smoothing: antialiased; }
+  body { overflow: hidden; }
+  /* grain and faint scanlines, over the whole page */
+  body::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 50; opacity: .5;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  button, input, select { font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; }
   button { -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
   :focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
   ::selection { background: var(--accent-dim); }
-  kbd { font: 10px/1 var(--mono); color: var(--mute); border: 1px solid var(--line-2); padding: 3px 5px; }
+  kbd { font: inherit; color: var(--mute); }
+  kbd::before { content: '['; } kbd::after { content: ']'; }
   .dm { display: block; }                    /* dot-matrix lettering, drawn by the script */
   .dm circle { fill: currentColor; }
 
-  /* ---------- top bar */
-  .top { position: relative; display: flex; align-items: center; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-  .brand { display: flex; align-items: center; color: var(--ink); flex: none; text-decoration: none; }
-  .brand .dm { height: 14px; width: auto; }
-  .file { display: flex; align-items: baseline; gap: 8px; min-width: 0; color: var(--faint); font: 11px/1 var(--mono); }
-  .file strong { color: var(--mute); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* ---------- the name, and what floats along the top */
+  .top { position: absolute; left: 14px; right: 14px; top: 12px; z-index: 6; display: flex; align-items: flex-start; gap: 16px; pointer-events: none; }
+  .top > * { pointer-events: auto; }
+  .brand { display: flex; align-items: flex-end; gap: 5px; color: var(--ink); flex: none; text-decoration: none; }
+  .brand .dm { height: 21px; width: auto; }
+  .brand::after { content: ''; width: 15px; height: 3px; background: var(--accent); animation: caret 1.2s steps(1) infinite; }
+  @keyframes caret { 50% { opacity: 0; } }
+  .name-col { display: grid; gap: 7px; min-width: 0; }
+  #status { color: var(--bad); max-width: 46ch; }
+  #status::before { content: '! '; }
   .top .spacer { flex: 1; }
-  #status { color: var(--mute); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #status.bad { color: var(--bad); }
-  #status .dot { display: none; }
-  .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; overflow: hidden; opacity: 0; transition: opacity .2s; }
+  .top .links { display: flex; align-items: center; gap: 16px; padding-top: 4px; min-width: 0; }
+  #file-meta { color: var(--mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .link { background: none; border: 0; padding: 0; color: var(--mute); cursor: pointer; white-space: nowrap; }
+  .link:hover, .link[aria-pressed=true] { color: var(--ink); }
+  .progress { position: fixed; left: 0; right: 0; top: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity .2s; z-index: 7; color: var(--accent); }
   .busy .progress { opacity: 1; }
-  .progress::after { content: ''; position: absolute; top: 0; height: 100%; width: 24%; background: var(--accent); animation: slide 1.1s cubic-bezier(.4, 0, .2, 1) infinite; }
+  .progress::after { content: ''; position: absolute; top: 0; height: 100%; width: 24%; background: var(--dots) 0 0 / 4px 2px; animation: slide 1.1s steps(24) infinite; }
   @keyframes slide { from { left: -24%; } to { left: 100%; } }
 
   /* ---------- buttons and fields */
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 30px; padding: 0 12px;
-    background: none; border: 1px solid var(--line-2); cursor: pointer; white-space: nowrap; transition: border-color .12s, background .12s, color .12s; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 26px; padding: 0 9px;
+    background: none; border: 1px solid var(--line-2); cursor: pointer; white-space: nowrap; }
   .btn:hover { border-color: var(--ink); }
-  .btn:active { background: var(--line); }
-  .btn.ghost { border-color: transparent; color: var(--mute); padding: 0 6px; }
+  .btn.ghost { border-color: transparent; color: var(--mute); padding: 0 4px; }
   .btn.ghost:hover { color: var(--ink); }
-  .btn.primary { background: var(--ink); border-color: var(--ink); color: #000; font-weight: 600; height: 36px; }
-  .btn.primary:hover { background: #fff; }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: #000; font-weight: 700; min-height: 30px; }
+  .btn.primary:hover { filter: brightness(1.15); }
   .btn[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
   .btn:disabled { opacity: .3; cursor: default; pointer-events: none; }
-  .btn.wide { width: 100%; }
-  .btn.sm { height: 26px; padding: 0 9px; font-size: 12px; }
-  .btn.icon { width: 30px; padding: 0; }
-  select.field, input.field { height: 30px; background: none; border: 1px solid var(--line-2); border-radius: 0; padding: 0 9px; min-width: 0; }
-  select.field { padding-right: 26px; appearance: none; cursor: pointer; color: var(--mute);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238d8a83' stroke-width='1.2'/%3E%3C/svg%3E");
-    background-repeat: no-repeat; background-position: right 9px center; }
+  .btn.icon { width: 26px; padding: 0; }
+  select.field, input.field { height: 26px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 0; padding: 0 8px; min-width: 0; }
+  select.field { cursor: pointer; }
   select.field option { background: #111; color: var(--ink); }
-  #inputs { flex: none; width: 112px; text-overflow: ellipsis; }
   input.field:focus, select.field:focus { border-color: var(--accent); outline: none; }
-  input.num { width: 64px; font: 12px var(--mono); text-align: center; padding: 0 4px; }
+  input.num { width: 58px; text-align: center; padding: 0 4px; }
   input[type=number]::-webkit-inner-spin-button { opacity: .3; }
-  #name { width: 100%; font: 12px var(--mono); }
 
-  /* one-of-several */
-  .seg { display: inline-flex; border: 1px solid var(--line-2); }
-  .seg button { height: 26px; padding: 0 11px; border: 0; background: none; color: var(--mute); cursor: pointer; white-space: nowrap; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
-  .seg button + button { border-left: 1px solid var(--line); }
-  .seg button:hover { color: var(--ink); }
-  .seg button[aria-pressed=true] { background: var(--ink); color: #000; }
-  .seg.fill { display: flex; }
-  .seg.fill button { flex: 1; }
+  /* one-of-several, and any-of-several: the same boxes */
+  .seg, .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .seg button, .chip { display: inline-flex; align-items: center; gap: 6px; min-height: 20px; padding: 1px 6px; border: 1px solid var(--line); background: none; color: var(--mute); cursor: pointer; white-space: nowrap; }
+  .seg button:hover, .chip:hover { color: var(--ink); border-color: var(--line-2); }
+  .seg button[aria-pressed=true], .chip[aria-pressed=true] { background: var(--accent); border-color: var(--accent); color: #000; }
+  .chip i { width: 8px; height: 8px; flex: none; box-shadow: 0 0 0 1px var(--line-2); }
+  .chip i.transparent { background: repeating-conic-gradient(#3a3a38 0 25%, #151514 0 50%) 0 0 / 4px 4px; }
+  .chips.any .chip::before { content: '\00B7'; }
+  .chips.any .chip[aria-pressed=true]::before { content: '\00D7'; }
 
-  /* chips: a little lamp, lit when on */
-  .chips { display: flex; flex-wrap: wrap; gap: 4px 14px; }
-  .chip { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0; border: 0; background: none; color: var(--mute); cursor: pointer; font-size: 12px; }
-  .chip::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--faint); transition: background .12s, box-shadow .12s; }
-  .chip:hover { color: var(--ink); }
-  .chip[aria-pressed=true] { color: var(--ink); }
-  .chip[aria-pressed=true]::before { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
-  .chip i { width: 9px; height: 9px; flex: none; box-shadow: 0 0 0 1px var(--line-2); }
-  .chip i.transparent { background: repeating-conic-gradient(#3a3a38 0 25%, #151514 0 50%) 0 0 / 6px 6px; }
-  #shapes .chip, #sizes .chip { font: 12px var(--mono); }
+  /* switch: off / on */
+  .switch { display: grid; grid-template-columns: 96px auto; align-items: center; gap: 8px; justify-content: start; cursor: pointer; }
+  .switch input { appearance: none; margin: 0; cursor: pointer; border: 1px solid var(--line); padding: 1px 6px; min-height: 20px; color: var(--mute); display: inline-flex; align-items: center; }
+  .switch input::after { content: 'off'; }
+  .switch input:checked { background: var(--accent); border-color: var(--accent); color: #000; }
+  .switch input:checked::after { content: 'on'; }
 
-  /* switch */
-  .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; color: var(--mute); }
-  .switch:hover { color: var(--ink); }
-  .switch input { appearance: none; flex: none; width: 26px; height: 12px; border: 1px solid var(--line-2); position: relative; cursor: pointer; margin: 0; transition: border-color .15s; }
-  .switch input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); transition: transform .15s, background .15s, box-shadow .15s; }
-  .switch input:checked { border-color: var(--accent-line); }
-  .switch input:checked::after { transform: translateX(14px); background: var(--accent); box-shadow: 0 0 6px var(--accent); }
-
-  /* range: a hairline and one dot */
-  .range { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: baseline; }
-  .range label { color: var(--mute); font-size: 12px; }
-  .range output { font: 11px/1 var(--mono); color: var(--ink); text-align: right; min-width: 40px; }
-  .range input { grid-column: 1 / -1; }
-  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; margin: 0; cursor: pointer; }
-  input[type=range]::-webkit-slider-runnable-track { height: 1px; background: linear-gradient(var(--accent), var(--accent)) 0 / var(--fill, 50%) 100% no-repeat, var(--line-2); }
-  input[type=range]::-moz-range-track { height: 1px; background: var(--line-2); }
-  input[type=range]::-moz-range-progress { height: 1px; background: var(--accent); }
-  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 9px; height: 9px; margin-top: -4px; border-radius: 50%; background: var(--ink); border: 0; box-shadow: 0 0 0 4px var(--bg); }
-  input[type=range]::-moz-range-thumb { width: 9px; height: 9px; border-radius: 50%; background: var(--ink); border: 0; box-shadow: 0 0 0 4px var(--bg); }
-  input[type=range]:disabled { opacity: .35; cursor: default; }
+  /* range: a row of dots, lit up to a bar */
+  .range { display: grid; grid-template-columns: 96px minmax(80px, 1fr) 46px; gap: 8px; align-items: center; }
+  .range output { color: var(--accent); text-align: right; white-space: nowrap; }
+  .sl { position: relative; height: 18px; display: block; }
+  .sl::before, .sl::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; background: var(--dots) 0 50% / 5px 5px repeat-x; }
+  .sl::before { right: 0; color: var(--line-2); }
+  .sl::after { width: var(--fill, 50%); color: var(--accent); }
+  input[type=range] { -webkit-appearance: none; appearance: none; position: relative; z-index: 1; display: block; width: 100%; height: 18px; background: transparent; margin: 0; cursor: ew-resize; }
+  input[type=range]::-webkit-slider-runnable-track { height: 18px; background: none; }
+  input[type=range]::-moz-range-track { height: 18px; background: none; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 5px; height: 15px; margin-top: 1.5px; border-radius: 0; background: var(--ink); border: 0; }
+  input[type=range]::-moz-range-thumb { width: 5px; height: 15px; border-radius: 0; background: var(--ink); border: 0; }
   input[type=range]:focus-visible { outline: none; }
-  input[type=range]:focus-visible::-webkit-slider-thumb { background: var(--accent); }
-  input[type=range]:focus-visible::-moz-range-thumb { background: var(--accent); }
+  input[type=range]:focus-visible::-webkit-slider-thumb { background: #fff; }
+  input[type=range]:focus-visible::-moz-range-thumb { background: #fff; }
 
-  /* ---------- layout: the stage, and the side */
-  main { display: grid; grid-template-columns: minmax(0, 1fr) var(--side); min-height: 0; }
-  .stage { position: relative; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); min-width: 0; min-height: 0; }
+  /* ---------- layout: the result fills the window; everything else floats on it */
+  main { position: absolute; inset: 0; }
+  .stage { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); }
   .stage[data-view=picture], .stage[data-view=live] { grid-template-columns: minmax(0, 1fr); }
   .stage[data-view=picture] .pane.live, .stage[data-view=live] .pane.picture { display: none; }
   .pane { position: relative; min-width: 0; min-height: 0; }
-  .pane + .pane { border-left: 1px solid var(--line); }
+  .pane + .pane { border-left: 1px solid var(--line-2); }
   .stage[data-view=picture] .pane + .pane, .stage[data-view=live] .pane + .pane { border-left: 0; }
   .pane-body { position: absolute; inset: 0; overflow: hidden; }
-  .tag { position: absolute; top: 12px; left: 14px; z-index: 2; font-size: 11px; color: var(--faint); pointer-events: none; }
-  .readout { position: absolute; top: 12px; right: 14px; z-index: 2; font: 11px/1.4 var(--mono); color: var(--faint); pointer-events: none; text-align: right; }
-  .pane.live .readout { right: 44px; }
-  #full-btn { position: absolute; top: 5px; right: 6px; z-index: 3; height: 26px; width: 26px; color: var(--faint); }
-  #full-btn:hover { color: var(--ink); }
+  .float { position: absolute; z-index: 5; }
+  body:not(.has-pic) .needs-pic, body.editing .not-editing { display: none !important; }
 
-  .side { border-left: 1px solid var(--line); display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
-  .side-scroll { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
-  .step { padding: 16px 18px 18px; border-bottom: 1px solid var(--line); display: grid; gap: 12px; }
-  .step-head { display: flex; align-items: center; gap: 10px; min-height: 22px; }
-  .step-head h2 { font-size: 12px; font-weight: 600; margin: 0; }
-  .step-head .aside { margin-left: auto; }
-  .hint { margin: -4px 0 0; color: var(--faint); font-size: 12px; }
-  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .row.split > * { flex: 1; }
-  .sub { display: grid; gap: 8px; }
-  .sub > .label { font-size: 12px; color: var(--mute); }
-  .sub.inline { grid-template-columns: 62px minmax(0, 1fr); align-items: center; }
-  .stack { display: grid; gap: 12px; }
-  .times { color: var(--faint); font: 12px var(--mono); }
-  details.step > summary { list-style: none; cursor: pointer; }
-  details.step > summary::-webkit-details-marker { display: none; }
-  details.step > summary .aside { color: var(--faint); transition: transform .15s; }
-  details.step[open] > summary .aside { transform: rotate(180deg); }
-  details.step { display: block; }
-  .more-body { display: grid; gap: 12px; margin-top: 14px; }
-  #help-btn { justify-self: start; padding: 0; }
-  body:not(.has-pic) .side { display: none; }
-  body:not(.has-pic) main { grid-template-columns: minmax(0, 1fr); }
-
-  /* the styles: four tiles, each showing the open picture in that style */
-  .styles { padding: 14px 18px 16px; }
-  #mode { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #mode button { position: relative; display: grid; grid-template-rows: auto auto; gap: 0; padding: 0; border: 1px solid var(--line); background: none; color: var(--faint); cursor: pointer; text-align: left; transition: border-color .15s, color .15s; }
-  #mode button:hover { border-color: var(--line-2); color: var(--mute); }
+  /* the styles: four tiles down the left, each showing the open picture in that style */
+  #mode { left: 14px; top: 50%; transform: translateY(-50%); display: grid; grid-template-columns: 74px; gap: 6px; }
+  #mode button { position: relative; aspect-ratio: 1; padding: 0; border: 1px solid var(--line); background: #000; color: var(--mute); cursor: pointer; overflow: hidden; text-align: left; }
+  #mode button:hover { border-color: var(--line-2); color: var(--ink); }
   #mode button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
-  #mode .thumb { display: block; width: 100%; aspect-ratio: 16 / 10; background: #000; overflow: hidden; }
-  #mode .thumb img, #mode .thumb canvas { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; opacity: .55; transition: opacity .15s; }
+  #mode button[aria-pressed=true]::before { content: '\25B8'; position: absolute; left: 4px; top: 2px; z-index: 1; }
+  #mode .thumb { position: absolute; inset: 0; }
+  #mode .thumb img, #mode .thumb canvas { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; opacity: .55; }
   #mode button:hover .thumb > *, #mode button[aria-pressed=true] .thumb > * { opacity: 1; }
-  body:not(.has-pic) #mode .thumb { display: none; }
-  body:not(.has-pic) #mode .name { border-top: 0; padding: 12px 10px; }
-  #mode .name { display: flex; align-items: center; justify-content: space-between; padding: 8px 9px; border-top: 1px solid var(--line); }
-  #mode .name .dm { height: 9px; width: auto; }
-  #mode .name kbd { border: 0; padding: 0; color: var(--faint); }
+  #mode .name { position: absolute; left: 4px; bottom: 3px; background: #000; padding: 0 3px; }
 
-  /* the dock: what the file will be, and the download */
-  .dock { border-top: 1px solid var(--line); padding: 12px 18px 16px; display: grid; gap: 10px; }
-  .summary { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font: 11px/1 var(--mono); color: var(--faint); }
-  .summary strong { font-weight: 400; color: var(--mute); }
+  /* the cut-out, small and always in view: a click opens its tools */
+  #cut { right: 14px; top: 44px; display: flex; gap: 8px; align-items: stretch; padding: 5px; border: 1px solid var(--line); background: var(--glass); color: var(--mute); cursor: pointer; text-align: left; }
+  #cut:hover { border-color: var(--line-2); }
+  #cut canvas { width: 54px; height: 54px; background: repeating-conic-gradient(#191817 0 25%, #0b0b0a 0 50%) 0 0 / 8px 8px; }
+  #cut span { display: flex; flex-direction: column; justify-content: space-between; white-space: nowrap; }
+  #cut b { color: var(--ink); font-weight: 400; } #cut u { color: var(--accent); text-decoration: none; }
 
-  /* by mode: clips (glow, streak, dust) or the map */
-  body[data-mode=live] .only-clip, body:not([data-mode=live]) .only-map { display: none !important; }
-  .swatch-row { display: flex; flex-wrap: wrap; gap: 10px; }
-  .swatch-row button { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+  /* the groups: a strip of names along the bottom; one opens as a card above it */
+  #groups { left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 0 20px; width: max-content; max-width: calc(100% - 28px);
+    padding: 0 12px; border: 1px solid var(--line-2); background: var(--glass); }
+  .grp > button { display: flex; gap: 6px; padding: 7px 0; background: none; border: 0; color: var(--mute); cursor: pointer; white-space: nowrap; }
+  .grp > button::before { content: '[+]'; color: var(--line-2); }
+  .grp > button:hover { color: var(--ink); }
+  .grp.open > button { color: var(--accent); } .grp.open > button::before { content: '[-]'; color: var(--accent); }
+  .grp .body { display: none; position: absolute; left: 50%; transform: translateX(-50%); width: max(100% + 2px, min(660px, 100vw - 28px)); bottom: 100%; max-height: min(52vh, 420px); overflow-y: auto; padding: 12px;
+    border: 1px solid var(--line-2); border-bottom-style: dashed; background: var(--glass); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 9px 22px; align-items: center;
+    scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+  .grp.open .body { display: grid; }
+  body[data-mode=live] .only-clip, body:not([data-mode=live]) .only-map, body[data-mode=glow] .not-glow { display: none !important; }
+  .sub { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; align-items: center; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .times { color: var(--mute); }
+  .swatch-row { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+  .swatch-row button { width: 14px; height: 14px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
   .swatch-row .sw { display: block; width: 100%; height: 100%; border-radius: 50%; }
-  .swatch-row button[aria-pressed=true] .sw { box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--ink); }
-  #fx-dial { width: 34px; height: 34px; margin: 0 2px 0 4px; cursor: grab; touch-action: none; border-radius: 50%; color: var(--ink); }
+  .swatch-row button[aria-pressed=true] .sw { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--ink); }
+  .own { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 1px 6px; min-height: 20px; border: 1px dashed var(--line-2); color: var(--mute); cursor: pointer; }
+  .own:hover { color: var(--ink); }
+  .own i { width: 9px; height: 9px; border-radius: 50%; background: var(--own, var(--faint)); }
+  .own.on { border-style: solid; border-color: var(--ink); color: var(--ink); }
+  .own input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; padding: 0; border: 0; }
+  .pre { display: inline-flex; } .pre .chip + .chip { border-left: 0; padding: 1px 5px; }
+  #pre-name { width: 140px; text-transform: none; }
+  #pre-list:empty::after { content: 'none yet'; color: var(--faint); }
+  #fx-dial { width: 30px; height: 30px; cursor: grab; touch-action: none; border-radius: 50%; color: var(--ink); }
   #fx-dial:active { cursor: grabbing; }
   #fx-dial.auto { color: var(--faint); }
 
+  /* the downloads: a column down the right */
+  .dock { right: 14px; top: 50%; transform: translateY(-50%); width: 74px; display: grid; gap: 4px; }
+  .dock .summary { position: absolute; right: 0; bottom: 100%; margin-bottom: 6px; text-align: right; white-space: nowrap; color: var(--mute); display: grid; }
+  .dock .btn { width: 100%; }
+
   /* ---------- the picture editor */
   #src { position: absolute; inset: 0; touch-action: none; }
-  .palette { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; background: rgba(0, 0, 0, .82); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line-2); z-index: 2; }
-  .palette button { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 56px; padding: 8px 8px 7px; border: 0; background: none; color: var(--mute); cursor: pointer; font-size: 11px; }
+  .palette { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; background: var(--glass); border: 1px solid var(--line-2); z-index: 2; }
+  .palette button { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 60px; padding: 8px 8px 7px; border: 0; background: none; color: var(--mute); cursor: pointer; }
   .palette button + button { border-left: 1px solid var(--line); }
   .palette button:hover { color: var(--ink); }
   .palette button[aria-pressed=true] { color: #000; background: var(--ink); }
   .palette svg { display: block; }
   .palette.off { opacity: 0; pointer-events: none; }
-
   /* the cut-out editor's options: only what the tool in hand needs */
-  .opts { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; height: 30px; padding: 0 12px; background: rgba(0, 0, 0, .82); z-index: 2; white-space: nowrap; font-size: 12px; }
+  .opts { position: absolute; left: 50%; bottom: 82px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; height: 30px; padding: 0 12px; background: var(--glass); z-index: 2; white-space: nowrap; }
   .opts > * { display: none; }
-  [data-tool=box] .opts .for-box, [data-tool=keep] .opts .for-brush, [data-tool=remove] .opts .for-brush, [data-tool=frame] .opts .for-frame { display: flex; }
-  body:not(.has-pic) .opts { display: none; }
-  .opts .range { align-items: center; gap: 10px; }
-  .opts .range input { width: 120px; }
-  .opts .range output { min-width: 34px; }
-  body:not(.has-pic) #edit-btn { display: none; }
-  #edit-btn { padding: 0 10px; }
-  #edit-btn[aria-pressed=true] { color: var(--accent); border-color: var(--accent-line); }
-  .seg button { padding: 0 8px; }
-  .step hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
-  .drop-note select { pointer-events: auto; background-color: #000; }
+  [data-tool=box] .opts .for-box, [data-tool=keep] .opts .for-brush, [data-tool=remove] .opts .for-brush, [data-tool=frame] .opts .for-frame { display: grid; }
+  [data-tool] .opts button { display: none; }
+  [data-tool=box] .opts button.for-box, [data-tool=keep] .opts button.for-brush, [data-tool=remove] .opts button.for-brush, [data-tool=frame] .opts button.for-frame { display: inline-flex; }
+  .opts .switch { grid-template-columns: auto auto; }
+  .opts .range { grid-template-columns: auto 120px 46px; }
 
-  /* nothing open yet: the whole stage is a field of dots asking for a picture */
-  .drop { position: absolute; inset: 0; z-index: 4; background: #000; cursor: pointer; overflow: hidden; }
-  .drop canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-  .drop-note { position: absolute; left: 0; right: 0; bottom: 9%; display: grid; justify-items: center; gap: 12px; color: var(--mute); font-size: 12px; pointer-events: none; }
-  .drop-note .btn { pointer-events: auto; background: #000; }
-  body.drag .stage::after { content: ''; position: absolute; inset: 10px; border: 1px solid var(--accent); z-index: 6; pointer-events: none; }
+  /* nothing open yet: a readout that says so, and how to give it a picture */
+  .drop { position: absolute; inset: 0; z-index: 4; background: var(--bg); cursor: pointer; display: grid; align-content: center; justify-items: start; gap: 22px; padding: 0 14px 0 max(14px, 12vw); }
+  .drop-big { display: grid; gap: clamp(8px, 1.2vw, 16px); color: var(--ink); }
+  .drop-big .dm { height: clamp(34px, 6.4vw, 76px); width: auto; }
+  .drop dl { display: grid; grid-template-columns: auto auto; gap: 5px 22px; margin: 0; color: var(--mute); }
+  .drop dt { color: var(--faint); } .drop dd { margin: 0; }
+  body.drag .stage::after { content: ''; position: absolute; inset: 10px; border: 1px dashed var(--accent); z-index: 6; pointer-events: none; }
 
   /* ---------- the preview */
   .screen { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; background: #000; }
@@ -232,75 +216,78 @@
   #fx-img { image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
   #fx-img.picking { cursor: crosshair; }
   #fx-focus { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 1px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000; pointer-events: none; z-index: 2; }
-  .ghost-screen { color: var(--faint); font-size: 12px; }
-  .fx-wait { display: grid; justify-items: center; gap: 12px; color: var(--mute); font-size: 12px; z-index: 1; }
+  .ghost-screen { color: var(--faint); }
+  .fx-wait { display: grid; justify-items: center; gap: 12px; color: var(--mute); z-index: 1; }
   .fx-wait i { display: flex; gap: 5px; }
   .fx-wait i::before, .fx-wait i::after, .fx-wait i b { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: lamp 1s infinite; }
   .fx-wait i b { animation-delay: .15s; } .fx-wait i::after { animation-delay: .3s; }
   @keyframes lamp { 0%, 100% { opacity: .2; } 40% { opacity: 1; box-shadow: 0 0 8px var(--accent); } }
-  .fx-wait.over { align-self: start; margin-top: 40px; padding: 7px 12px; background: rgba(0, 0, 0, .8); border: 1px solid var(--line-2); grid-auto-flow: column; align-items: center; }
+  .fx-wait.over { align-self: start; margin-top: 46px; padding: 6px 10px; background: var(--glass); border: 1px solid var(--line-2); grid-auto-flow: column; align-items: center; }
   #preview-box:fullscreen { background: #000; }
-
-  /* the map's look, over its preview */
-  .live-bar { position: absolute; left: 12px; right: 12px; bottom: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; z-index: 2; }
-  .live-bar .group { display: flex; background: rgba(0, 0, 0, .82); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line-2); }
-  .live-bar button { height: 28px; padding: 0 10px; border: 0; background: none; color: var(--mute); cursor: pointer; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-  .live-bar button:hover { color: var(--ink); }
-  .live-bar button[aria-pressed=true] { color: #000; background: var(--ink); }
-  .live-bar .sw { width: 10px; height: 10px; border-radius: 50%; }
-  .live-bar .swatches button { padding: 0 8px; }
-  .live-bar .swatches button[aria-pressed=true] { background: none; }
-  .live-bar .swatches button[aria-pressed=true] .sw { box-shadow: 0 0 0 2px #000, 0 0 0 3px var(--ink); }
-  .live-bar .label { color: var(--faint); font-size: 12px; line-height: 28px; padding: 0 2px 0 10px; }
-  .live-bar.off { display: none; }
+  /* a new result resolves out of dots; a rough one, while the real one renders, stays half resolved */
+  @property --r { syntax: '<length>'; inherits: false; initial-value: 9px; }
+  #fx-img.rough, #fx-img.resolve { -webkit-mask: radial-gradient(circle, #000 var(--r), transparent calc(var(--r) + .6px)) 0 0 / 6px 6px; mask: radial-gradient(circle, #000 var(--r), transparent calc(var(--r) + .6px)) 0 0 / 6px 6px; }
+  #fx-img.rough { --r: 1.7px; }
+  #fx-img.resolve { animation: resolve .55s steps(9) forwards; }
+  @keyframes resolve { from { --r: .6px; } to { --r: 4.6px; } }
+  .grp.open .body { animation: rise .12s steps(3); }
+  @keyframes rise { from { opacity: 0; } }
 
   /* ---------- the shortcuts sheet, and notes */
-  dialog#help { background: #000; color: var(--ink); border: 1px solid var(--line-2); padding: 20px 22px; max-width: min(92vw, 400px); }
+  dialog#help { background: var(--bg); color: var(--ink); border: 1px solid var(--line-2); padding: 18px 20px; max-width: min(92vw, 440px); }
   dialog#help::backdrop { background: rgba(0, 0, 0, .7); }
-  dialog#help h3 { margin: 0 0 14px; font-size: 13px; font-weight: 600; }
-  dialog#help dl { display: grid; grid-template-columns: auto 1fr; gap: 9px 16px; margin: 0 0 18px; font-size: 12px; color: var(--mute); align-items: center; }
+  dialog#help h3 { margin: 0 0 14px; font-size: inherit; font-weight: 700; }
+  dialog#help dl { display: grid; grid-template-columns: auto 1fr; gap: 9px 16px; margin: 0 0 18px; color: var(--mute); align-items: center; }
   dialog#help dt { color: var(--ink); white-space: nowrap; } dialog#help dd { margin: 0; }
   dialog#help form { display: flex; justify-content: flex-end; }
-  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); padding: 9px 14px; background: #000; border: 1px solid var(--line-2); font-size: 12px; z-index: 20; max-width: 90vw; }
-  .toast.bad { border-color: var(--bad); color: var(--bad); }
-  .mstatus { display: none; }
+  .toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); padding: 7px 12px; background: var(--bg); border: 1px solid var(--line-2); z-index: 20; max-width: 90vw; }
 
-  /* ---------- narrower: the side slims, the split goes */
-  @media (max-width: 1180px) { :root { --side: 296px; } }
+  /* ---------- a phone: the result on top, the rest in a column under it */
   @media (max-width: 900px) {
-    html { height: auto; }
-    body { overflow: auto; height: auto; min-height: 100%; grid-template-rows: 48px auto; }
-    .top { position: sticky; top: 0; z-index: 8; background: #000; gap: 10px; padding: 0 12px; }
-        main { grid-template-columns: minmax(0, 1fr); }
-    .stage { height: min(62vh, 560px); border-bottom: 1px solid var(--line); }
-    body:not(.has-pic) .stage { height: calc(100vh - 48px); height: calc(100dvh - 48px); border-bottom: 0; }
-    .side { border-left: 0; grid-template-rows: auto auto; }
-    .side-scroll { overflow: visible; }
-    .dock { position: sticky; bottom: 0; background: #000; z-index: 5; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
-    #mode { grid-template-columns: repeat(4, 1fr); gap: 6px; }
-    #mode .name { padding: 7px 6px; justify-content: center; }
-    #mode .name kbd { display: none; }
-    #mode .name .dm { height: 7px; }
-    .palette button { min-width: 50px; }
-    .live-bar .label { display: none; }
-    .step { padding: 14px 14px 16px; }
-    .styles { padding: 12px 14px 14px; }
+    html, body { height: auto; }
+    body { overflow: auto; min-height: 100%; }
+    .top { position: sticky; top: 0; left: 0; right: 0; padding: 10px 12px; background: var(--bg); border-bottom: 1px solid var(--line); gap: 10px; }
+    .top .links { gap: 12px; }
+    #file-meta, #full-btn { display: none; }
+    main { position: static; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-bottom: 12px; }
+    .stage { position: relative; height: min(58vh, 560px); border-bottom: 1px solid var(--line); }
+    body:not(.has-pic) .stage { height: calc(100vh - 46px); height: calc(100dvh - 46px); border-bottom: 0; }
+    body:not(.has-pic) { overflow: hidden; }
+    body:not(.has-pic) main { padding: 0; }
+    #mode, #cut, #groups { position: static; transform: none; margin: 0 12px; }
+    #mode { grid-template-columns: repeat(4, 1fr); }
+    #cut { justify-self: start; }
+    #groups { width: auto; max-width: none; display: grid; padding: 0 10px; }
+    .grp + .grp { border-top: 1px solid var(--line); }
+    .grp > button { width: 100%; padding: 10px 0; }
+    .grp .body { position: static; transform: none; width: auto; border: 0; padding: 2px 0 12px; max-height: none; grid-template-columns: 1fr; background: none; }
+    .dock { position: sticky; top: auto; transform: none; bottom: 0; width: auto; margin: 0; padding: 8px 12px max(10px, env(safe-area-inset-bottom)); background: var(--bg); border-top: 1px solid var(--line-2); z-index: 6; display: flex; flex-wrap: wrap; }
+    .dock .btn { flex: 1; width: auto; }
+    .dock .summary { flex-basis: 100%; display: flex; gap: 10px; }
+    .dock .summary { position: static; margin: 0; text-align: left; }
+    .palette button { min-width: 52px; }
   }
-  @media (hover: none) { kbd { display: none; } dialog#help kbd { display: inline; } }
+  @media (hover: none) { .link kbd { display: none; } }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 0s !important; } }
 </style>
 </head>
 <body data-mode="glow">
+<div class="progress" aria-hidden="true"></div>
 <header class="top" id="top">
-  <a class="brand" href="./" aria-label="Phosphor" id="brand"></a>
+  <div class="name-col">
+    <a class="brand" href="./" aria-label="Phosphor" id="brand"></a>
+    <div id="status" role="status" hidden><span id="status-text"></span></div>
+  </div>
   <div class="spacer"></div>
-  <button class="btn ghost" id="edit-btn" aria-pressed="false" title="Place the picture in the frame, and fix its cut-out (V)">Crop &amp; cut-out</button>
-  <button class="btn" id="open" title="Open a picture (O)">Open</button>
+  <div class="links">
+    <span id="file-meta" class="needs-pic"></span>
+    <button class="link needs-pic" id="edit-btn" aria-pressed="false" title="Place the picture in the frame, and fix its cut-out (V)"><kbd>V</kbd> Cut-out</button>
+    <button class="link" id="open" title="Open a picture (O)"><kbd>O</kbd> Open</button>
+    <button class="link" id="help-btn" title="Keyboard shortcuts (?)"><kbd>?</kbd> Keys</button>
+    <button class="link needs-pic" id="full-btn" title="The result alone, full screen (Shift+F)"><kbd>⇧F</kbd> Full</button>
+  </div>
   <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden>
-  <div id="file-meta" hidden></div>
-  <div id="status" hidden><span id="status-text">Ready</span></div>
-  <span class="mstatus" id="mstatus"></span>
-  <div class="progress" aria-hidden="true"></div>
+  <span id="mstatus" hidden></span>
 </header>
 
 <main id="main">
@@ -310,13 +297,13 @@
         <span id="src-meta" hidden></span>
         <canvas id="src"></canvas>
         <div class="opts" id="opts">
-          <label class="switch for-box"><span>Use the whole picture</span><input type="checkbox" id="skip"></label>
-          <button class="btn ghost sm for-box" id="redo-cut" title="Drop the box and brush marks, and find the figure afresh">Start over</button>
-          <div class="range for-brush"><label for="brush">Brush</label><input type="range" id="brush" min="4" max="80" value="20"><output id="brush-out">20 px</output></div>
-          <button class="btn ghost sm for-brush" id="undo-stroke" title="Undo the last brush mark (Ctrl+Z)">Undo</button>
-          <button class="btn ghost sm for-brush" id="clear-strokes" title="Remove every brush mark">Clear</button>
-          <div class="range for-frame"><label for="zoom">Zoom</label><input type="range" id="zoom" min="-1" max="3" step="0.01" value="0"><output id="zoom-out">–</output></div>
-          <button class="btn ghost sm for-frame" id="auto-frame" title="Frame the figure again">Fit</button>
+          <label class="switch for-box" title="Skip the cut-out: every part of the picture becomes dots"><span>Whole picture</span><input type="checkbox" id="skip"></label>
+          <button class="btn ghost for-box" id="redo-cut" title="Drop the box and brush marks, and find the figure afresh">Start over</button>
+          <div class="range for-brush"><label for="brush">Brush</label><span class="sl"><input type="range" id="brush" min="4" max="80" value="20"></span><output id="brush-out">20 px</output></div>
+          <button class="btn ghost for-brush" id="undo-stroke" title="Undo the last brush mark (Ctrl+Z)">Undo</button>
+          <button class="btn ghost for-brush" id="clear-strokes" title="Remove every brush mark">Clear</button>
+          <div class="range for-frame"><label for="zoom">Zoom</label><span class="sl"><input type="range" id="zoom" min="-1" max="3" step="0.01" value="0"></span><output id="zoom-out">–</output></div>
+          <button class="btn ghost for-frame" id="auto-frame" title="Frame the figure again">Fit</button>
         </div>
         <nav class="palette off" id="tools" aria-label="Tools">
           <button data-tool="box" aria-pressed="true" title="Box: draw around the figure (B)">
@@ -334,8 +321,6 @@
     <section class="pane live" aria-label="Result">
       <div class="pane-body" id="preview-box">
         <span id="live-meta" hidden></span>
-        <button class="btn ghost icon" id="full-btn" title="Full screen (Shift+F)" aria-label="Full screen">
-          <svg width="12" height="12" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6.5v-4h4M11.5 2.5h4v4M15.5 11.5v4h-4M6.5 15.5h-4v-4"/></svg></button>
         <div class="screen">
           <div id="stage"></div>
           <img id="fx-img" alt="The picture in the chosen style" hidden>
@@ -343,98 +328,106 @@
           <div class="fx-wait" id="fx-wait" hidden><i><b></b></i><span>Rendering</span></div>
           <div class="ghost-screen" id="prev-empty"></div>
         </div>
-        <div class="live-bar off" id="live-bar">
-          <div class="group swatches" id="presets"></div>
-          <div class="group" id="dot"><button data-v="1" aria-pressed="true" title="1 px dots">1px</button><button data-v="2" title="2 × 2 px dots: a coarser grid">2px</button></div>
-        </div>
       </div>
     </section>
 
-    <div class="drop" id="drop" role="button" tabindex="0" aria-label="Drop a picture, or choose a file">
-      <canvas id="drop-dots" aria-hidden="true"></canvas>
-      <div class="drop-note"><div class="row"><button class="btn" id="open-2">Choose a file</button><select class="field" id="inputs" title="Pictures in the in/ folder" hidden><option value="">From in/</option></select></div><span id="privacy">or drop one anywhere, or paste</span></div>
+    <div class="drop" id="drop" role="button" tabindex="0" aria-label="No picture: drop one, paste one, or choose a file">
+      <div class="drop-big" id="drop-big"></div>
+      <dl><dt>Input</dt><dd>drop a picture, or paste one</dd>
+        <dt>Format</dt><dd>png · jpeg · webp · gif · bmp</dd></dl>
+      <button class="btn primary" id="open-2">Choose a file</button>
     </div>
   </div>
 
-  <aside class="side" id="panel">
-    <div class="side-scroll">
-      <section class="step styles">
-        <div id="mode" role="group" aria-label="Style">
-          <button data-v="glow" aria-pressed="true" title="Blue dots that warm where the light gathers"><span class="thumb"><img id="th-glow" alt="" hidden></span><span class="name"><span data-dm="GLOW"></span></span></button>
-          <button data-v="streak" title="One colour on a coarse grid, with rain"><span class="thumb"><img id="th-streak" alt="" hidden></span><span class="name"><span data-dm="STREAK"></span></span></button>
-          <button data-v="dust" title="White dots and dashes, streaming off"><span class="thumb"><img id="th-dust" alt="" hidden></span><span class="name"><span data-dm="DUST"></span></span></button>
-          <button data-v="live" title="A dot map and PNGs, for your own code"><span class="thumb"><canvas id="th-live" width="160" height="100"></canvas></span><span class="name"><span data-dm="MAP"></span></span></button>
-        </div>
-      </section>
+  <nav class="float needs-pic not-editing" id="mode" aria-label="Style">
+    <button data-v="glow" aria-pressed="true" title="Glow: blue dots that warm where the light gathers (1)"><span class="thumb"><img id="th-glow" alt="" hidden></span><span class="name">Glow</span></button>
+    <button data-v="streak" title="Streak: one colour on a coarse grid, with rain (2)"><span class="thumb"><img id="th-streak" alt="" hidden></span><span class="name">Streak</span></button>
+    <button data-v="dust" title="Dust: pale dots and dashes, streaming off (3)"><span class="thumb"><img id="th-dust" alt="" hidden></span><span class="name">Dust</span></button>
+    <button data-v="live" title="Map: a dot map and PNGs, for your own code (4)"><span class="thumb"><canvas id="th-live" width="148" height="148"></canvas></span><span class="name">Map</span></button>
+  </nav>
 
-      <section class="step only-clip">
-        <div class="sub" id="fx-colours-row"><div class="swatch-row" id="fx-colours"></div></div>
-        <div class="range"><label for="tu-exposure">Light</label><output id="tu-exposure-out"></output><input type="range" id="tu-exposure" min="-100" max="100" step="5" value="0"></div>
-        <div class="chips" id="shapes">
+  <button class="float needs-pic not-editing" id="cut" title="What was cut out of the picture. Click to fix it, or to move the frame (V)">
+    <canvas id="cut-thumb" width="108" height="108"></canvas>
+    <span><b>Cut-out</b><i id="cut-note" style="font-style:normal">auto</i><u><kbd>V</kbd> fix / frame</u></span>
+  </button>
+
+  <div class="float needs-pic not-editing" id="groups">
+    <div class="grp" data-g="exposure">
+      <button title="How bright the dots are, and where">Exposure</button>
+      <div class="body">
+        <div class="range only-clip" title="Overall brightness: more or fewer dots lit"><label for="tu-exposure">Light</label><span class="sl"><input type="range" id="tu-exposure" min="-100" max="100" step="5" value="0"></span><output id="tu-exposure-out"></output></div>
+        <div class="range only-clip" title="How far the brightest parts spread"><label for="tu-highlights">Highlights</label><span class="sl"><input type="range" id="tu-highlights" min="-100" max="100" step="5" value="0"></span><output id="tu-highlights-out"></output></div>
+        <div class="range only-clip" id="tu-warmth-l" title="How much of the lit area turns from blue to warm colours"><label for="tu-warmth">Warmth</label><span class="sl"><input type="range" id="tu-warmth" min="-100" max="100" step="5" value="0"></span><output id="tu-warmth-out"></output></div>
+        <div class="sub only-clip"><span>Hot spot</span><div class="row"><button class="btn" id="tu-focus" title="Click a point on the clip: the light gathers there">Pick on clip</button></div></div>
+        <div class="sub only-clip"><span>Reset</span><div class="row"><button class="btn" id="tu-reset" title="Light, highlights, warmth, hot spot, drips and direction back to the style's own settings">Style defaults</button></div></div>
+        <div id="tone" class="only-map" style="display:contents"></div>
+        <div class="sub only-map"><span>Lit areas</span><div class="row"><button class="btn" id="full" aria-pressed="false" title="Fully lit areas stay solid instead of flickering">Solid</button></div></div>
+        <div class="sub only-map"><span>Reset</span><div class="row"><button class="btn" id="reset-tone" title="All six tone sliders back to their defaults">Tone defaults</button></div></div>
+      </div>
+    </div>
+    <div class="grp not-glow" data-g="palette">
+      <button title="The colour of the dots">Palette</button>
+      <div class="body">
+        <div class="sub only-clip" id="fx-colours-row" title="The one colour this style draws in"><span>Colour</span><div class="row"><div class="swatch-row" id="fx-colours"></div><label class="own" id="fx-own-l" title="Any colour of your own"><i></i><span>own</span><input type="color" id="fx-own" value="#ffb000" aria-label="Your own colour"></label></div></div>
+        <div class="sub only-map" title="The colour of the preview here; the download holds every colour ticked below"><span>Preview</span><div class="swatch-row" id="presets"></div></div>
+        <div class="sub only-map" title="Which colours the PNGs are made in"><span>PNG colours</span><div class="chips any" id="ex-colours"></div></div>
+        <div class="sub only-map" title="Which backgrounds the PNGs are made on"><span>PNG grounds</span><div class="chips any" id="ex-bgs"></div></div>
+      </div>
+    </div>
+    <div class="grp" data-g="animation">
+      <button title="What moves, which way, and for how long">Animation</button>
+      <div class="body">
+        <label class="switch only-clip" id="fx-streaks-row" title="Dotted lines falling from the lower edges"><span>Drips</span><input type="checkbox" id="fx-streaks" checked></label>
+        <div class="sub only-clip" id="fx-angle" title="Which way the dust streams off"><span>Direction</span>
+          <div class="row"><button class="btn" data-v="auto" aria-pressed="true" title="Toward the emptier side">Auto</button><svg id="fx-dial" viewBox="0 0 24 24" role="slider" tabindex="0" aria-label="Direction" aria-valuemin="0" aria-valuemax="359" aria-valuenow="0"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-opacity=".35"/><line x1="12" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle class="knob" cx="20" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg></div>
+        </div>
+        <div class="sub only-clip" title="How long the loop runs before it repeats"><span>Loop</span><div class="seg" id="fx-len"></div></div>
+        <div class="sub only-map" title="Loose dots drifting in from a side of the preview"><span>Particles</span><div class="seg" id="parts"><button data-v="off" aria-pressed="true">Off</button><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="all">All</button></div></div>
+      </div>
+    </div>
+    <div class="grp" data-g="frame">
+      <button title="The shape of the picture and the size of its dots">Frame</button>
+      <div class="body">
+        <div class="sub only-clip" title="The shape of the clip, width to height"><span>Shape</span><div class="chips" id="shapes">
           <button class="chip" data-v="512x512">1:1</button>
           <button class="chip" data-v="512x640">4:5</button>
           <button class="chip" data-v="480x640">3:4</button>
           <button class="chip" data-v="640x360">16:9</button>
           <button class="chip" data-v="360x640">9:16</button>
-        </div>
-      </section>
-
-      <section class="step only-map">
-        <div class="chips" id="sizes">
+        </div></div>
+        <div class="sub only-clip" title="How many dots across the longer side: more is finer"><span>Dots across</span><div class="seg" id="fx-long"></div></div>
+        <div class="sub only-clip" title="How many pixels each dot takes in the downloaded file"><span>Px per dot</span><div class="seg" id="fx-scale"></div></div>
+        <div class="sub only-map" title="The map's size, in dots"><span>Size</span><div class="chips" id="sizes">
           <button class="chip" data-v="340x280">340×280</button>
           <button class="chip" data-v="680x560">680×560</button>
           <button class="chip" data-v="512x512">512²</button>
           <button class="chip" data-v="1024x1024">1024²</button>
-        </div>
-        <div class="row"><input class="field num" type="number" id="w" min="8" max="2048" value="512" aria-label="Width"><span class="times">×</span><input class="field num" type="number" id="h" min="8" max="2048" value="512" aria-label="Height"><span class="times">dots</span></div>
-      </section>
-
-      <details class="step" id="more">
-        <summary class="step-head"><h2>More</h2>
-          <svg class="aside" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></summary>
-        <div class="more-body">
-        <div class="only-clip stack">
-          <div class="range"><label for="tu-highlights">Highlights</label><output id="tu-highlights-out"></output><input type="range" id="tu-highlights" min="-100" max="100" step="5" value="0"></div>
-          <div class="range" id="tu-warmth-l"><label for="tu-warmth">Warmth</label><output id="tu-warmth-out"></output><input type="range" id="tu-warmth" min="-100" max="100" step="5" value="0"></div>
-          <label class="switch" id="fx-streaks-row"><span>Falling streaks</span><input type="checkbox" id="fx-streaks" checked></label>
-          <div class="sub inline" id="fx-angle"><span class="label">Direction</span>
-            <div class="row"><button class="btn sm" data-v="auto" aria-pressed="true" title="Toward the emptier side">Auto</button><svg id="fx-dial" viewBox="0 0 24 24" role="slider" tabindex="0" aria-label="Direction" aria-valuemin="0" aria-valuemax="359" aria-valuenow="0"><circle cx="12" cy="12" r="10.5" fill="none" stroke="currentColor" stroke-opacity=".35"/><line x1="12" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle class="knob" cx="20" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg></div>
-          </div>
-          <div class="row split"><button class="btn sm" id="tu-focus" title="Pick where the light gathers">Set light source</button><button class="btn sm" id="tu-reset" title="Back to the style's own settings">Reset look</button></div>
-          <hr>
-          <div class="sub inline"><span class="label">Detail</span><div class="seg fill" id="fx-long" title="Dots across the longer side"></div></div>
-          <div class="sub inline"><span class="label">Length</span><div class="seg fill" id="fx-len"></div></div>
-          <div class="sub inline"><span class="label">Dot size</span><div class="seg fill" id="fx-scale" title="Pixels per dot in the file"></div></div>
-        </div>
-        <div class="only-map stack">
-          <div class="sub inline"><span class="label">Particles</span><div class="seg fill" id="parts"><button data-v="off" aria-pressed="true">Off</button><button data-v="left">Left</button><button data-v="right">Right</button><button data-v="all">All</button></div></div>
-          <div class="row split"><button class="btn sm" id="full" aria-pressed="false" title="Fully lit areas stay solid instead of flickering">Solid light</button><button class="btn sm" id="reset-tone">Reset tone</button></div>
-          <div class="sub" id="tone"></div>
-          <hr>
-          <div class="sub"><span class="label">Colours</span><div class="chips" id="ex-colours"></div></div>
-          <div class="sub"><span class="label">Backgrounds</span><div class="chips" id="ex-bgs"></div></div>
-          <div class="sub"><span class="label">Dots</span><div class="chips" id="ex-dots"></div></div>
-          <div class="sub inline"><span class="label">PNG scale</span>
-            <div class="seg fill" id="scale"><button data-v="1" aria-pressed="true">1×</button><button data-v="2">2×</button><button data-v="3">3×</button><button data-v="4">4×</button><button data-v="8">8×</button></div>
-          </div>
-        </div>
-        <div class="sub inline"><span class="label">Name</span><input class="field" type="text" id="name" placeholder="name" aria-label="File name" spellcheck="false" autocomplete="off"></div>
-        <label class="switch" id="save-row" hidden><span>Also save to out/</span><input type="checkbox" id="save" checked></label>
-        <button class="btn ghost sm" id="help-btn">Keyboard shortcuts</button>
-        </div>
-      </details>
-    </div>
-
-    <div class="dock">
-      <div class="summary only-clip"><span>Download</span><strong id="fx-size">–</strong></div>
-      <div class="row split only-clip">
-        <button class="btn primary" id="fx-gif" disabled title="Download a GIF (G)">GIF</button>
-        <button class="btn primary" id="fx-webp" disabled title="Download an animated WebP: the same dots, much smaller (W)">WebP</button>
+        </div></div>
+        <div class="sub only-map" title="Any size, in dots: width by height"><span>Custom</span><div class="row"><input class="field num" type="number" id="w" min="8" max="2048" value="512" aria-label="Width"><span class="times">×</span><input class="field num" type="number" id="h" min="8" max="2048" value="512" aria-label="Height"></div></div>
+        <div class="sub only-map" title="The preview's dots: one pixel each, or a coarser 2 × 2"><span>Preview dot</span><div class="seg" id="dot"><button data-v="1" aria-pressed="true">1 px</button><button data-v="2">2 px</button></div></div>
+        <div class="sub only-map" title="Which dot sizes the PNGs are made in"><span>PNG dots</span><div class="chips any" id="ex-dots"></div></div>
+        <div class="sub only-map" title="Each PNG enlarged by this much"><span>PNG scale</span><div class="seg" id="scale"><button data-v="1" aria-pressed="true">1×</button><button data-v="2">2×</button><button data-v="3">3×</button><button data-v="4">4×</button><button data-v="8">8×</button></div></div>
       </div>
-      <div class="summary only-map"><span id="ex-count">–</span><strong id="ex-size">–</strong></div>
-      <button class="btn primary wide only-map" id="export" disabled title="map.ts and PNGs of each state">Download zip</button>
     </div>
-  </aside>
+    <div class="grp" data-g="presets">
+      <button title="Your saved settings for this style">Presets</button>
+      <div class="body">
+        <div class="sub" title="Click one to use it; × removes it. Each style keeps its own list"><span>Saved</span><div class="chips" id="pre-list"></div></div>
+        <div class="sub" title="Keep this style's settings as they are now, under a name"><span>Save as</span><div class="row"><input class="field" type="text" id="pre-name" maxlength="24" placeholder="name" aria-label="Preset name" spellcheck="false" autocomplete="off"><button class="btn" id="pre-save">Save</button></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="float needs-pic not-editing dock">
+    <div class="summary only-clip"><span id="fx-size">–</span></div>
+    <button class="btn primary only-clip" id="fx-gif" disabled title="Download a GIF (G)">GIF</button>
+    <button class="btn primary only-clip" id="fx-webp" disabled title="Download an animated WebP: the same dots, much smaller (W)">WebP</button>
+    <button class="btn only-clip" id="fx-png" disabled title="Download a still PNG: the clip's first frame (P)">PNG</button>
+    <button class="btn only-clip" id="fx-copy" disabled title="Copy that still to the clipboard (C)">Copy</button>
+    <div class="summary only-map"><span id="ex-count">–</span><span id="ex-size">–</span></div>
+    <button class="btn primary only-map" id="export" disabled title="Download a zip: map.ts and PNGs of each state">Zip</button>
+    <button class="btn" id="share" title="Copy a link that opens the page with these settings. It carries the settings, not the picture">Link</button>
+  </div>
 </main>
 
 <dialog id="help">
@@ -442,15 +435,17 @@
   <dl>
     <dt><kbd>O</kbd></dt><dd>Open a picture (or drop or paste one)</dd>
     <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></dt><dd>Glow, Streak, Dust, Map</dd>
-    <dt><kbd>V</kbd></dt><dd>Crop &amp; cut-out, and back (<kbd>Esc</kbd> leaves it)</dd>
+    <dt><kbd>V</kbd></dt><dd>Cut-out and frame, and back (<kbd>Esc</kbd> leaves it)</dd>
     <dt><kbd>B</kbd> <kbd>K</kbd> <kbd>R</kbd> <kbd>F</kbd></dt><dd>Box, Keep, Remove, Frame</dd>
     <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Brush smaller, bigger</dd>
     <dt><kbd>Ctrl</kbd> <kbd>Z</kbd></dt><dd>Undo the last brush mark</dd>
-    <dt><kbd>G</kbd> <kbd>W</kbd></dt><dd>Download GIF, WebP</dd>
+    <dt><kbd>G</kbd> <kbd>W</kbd> <kbd>P</kbd></dt><dd>Download GIF, WebP, still PNG</dd>
+    <dt><kbd>C</kbd></dt><dd>Copy the still</dd>
     <dt><kbd>Shift</kbd> <kbd>F</kbd></dt><dd>Result full screen</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Close the open group</dd>
     <dt>Double-click a slider</dt><dd>Back to its default</dd>
   </dl>
-  <form method="dialog"><button class="btn sm">Close</button></form>
+  <form method="dialog"><button class="btn">Close</button></form>
 </dialog>
 <script type="module" src="dist/app.js"></script>
 </body>

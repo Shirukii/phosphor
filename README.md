@@ -50,28 +50,49 @@ npm install
 npm run web
 ```
 
-Then open http://localhost:8340, and drop a picture on it or pick one from `in/`.
+Then open http://localhost:8340, and drop a picture on it, paste one, or choose a file.
 
-Pick a style from the four tiles, which show the open picture in each: **Glow**, **Streak** or
-**Dust** make a looping clip, **Map** makes the live dot map for your own code. The stage shows the
-result; the panel holds the style, its colour, Light and the clip's shape (1:1, 4:5, 3:4, 16:9,
-9:16), and the downloads: a GIF (for X: up to 15 MB) or an animated WebP (lossless, a fraction of
-the size), also saved to `out/<name>/fx/`. The page remembers the style, its settings and the shape.
+The result fills the window, and everything else floats over it. Down the left are four tiles,
+which show the open picture in each style: **Glow**, **Streak** or **Dust** make a looping clip,
+**Map** makes the live dot map for your own code. Down the right are the downloads: a GIF (for X:
+up to 15 MB), an animated WebP (lossless, a fraction of the size), a still PNG (the first frame),
+Copy (that still, to the clipboard) and Link (a link that opens the page with the same settings;
+it carries the settings, not the picture). Top right is the cut-out,
+small, so a wrong one is noticed. Errors appear under the name, and nowhere else. The page
+remembers the style, its settings and the shape.
 
-- **Crop & cut-out** (`V`, `Esc` to leave) puts the picture beside the result. The cut-out is guessed at once; draw
-  a box around the figure to redo it, brush with *keep* / *remove* to fix what it got wrong
-  (Ctrl+Z undoes a mark, *Start over* drops them all), and drag and scroll with the *frame* tool to
-  place the figure. A new shape frames the figure again unless you placed it by hand. A picture
-  with its own transparency is used as it is.
-- **More** holds the rest: Highlights, glow's Warmth, falling streaks and light source, the way
-  dust streams off, detail (dots across), length, dot size and the file's name. Double-click a
-  slider to reset it.
+Along the bottom is a strip of five groups; a click opens one as a card above it (`Esc` closes it).
+Every control says what it does when the pointer rests on it, and a double-click on a slider
+resets it.
 
-In **Map** mode the panel has the map's own settings instead: its size in dots (any up to
-2048×2048), and under More, particles, solid full light, **Tone**, and an export of `map.ts` plus
-PNGs per colour and background as a zip. The preview there is the renderer itself, held still:
-palettes and 1px / 2px dots under it. Blinking, breathing, sleep and rays are the renderer's own
-(see below) and are not in the page.
+- **Exposure:** Light, Highlights, and for glow Warmth and the hot spot (click a point on the
+  clip: the light gathers there).
+- **Palette:** streak's and dust's one colour: a swatch, or any colour of your own. Glow has its
+  own colours, so the group is not shown for it.
+- **Animation:** glow's drips, the way dust streams off (a dial, or Auto), and the loop's length.
+- **Frame:** the clip's shape (1:1, 4:5, 3:4, 16:9, 9:16), dots across the longer side, and pixels
+  per dot in the file.
+- **Presets:** the style's settings under a name, kept in this browser; each style has its own
+  list.
+
+While a clip renders, a small rough one is drawn at once and shown half resolved in its place; the
+finished clip then resolves out of dots.
+
+**Cut-out** (`V`, or a click on the small cut-out; `Esc` to leave) puts the picture beside the
+result. The cut-out is guessed at once; draw a box around the figure to redo it, brush with *keep*
+/ *remove* to fix what it got wrong (Ctrl+Z undoes a mark, *Start over* drops them all), and drag
+and scroll with the *frame* tool to place the figure. A new shape frames the figure again unless
+you placed it by hand. A picture with its own transparency is used as it is.
+
+In **Map** mode the same groups hold the map's own settings: the six **tone** sliders and
+solid full light under Exposure; the preview's palette and which colours and backgrounds the PNGs
+come in under Palette; particles under Animation; and under Frame the size in dots (any up to
+2048×2048), the preview's 1 px or 2 px dots, and the PNGs' dot sizes and scale. The download is a
+zip of `map.ts` plus the PNGs. The preview there is the renderer itself, held still. Blinking,
+breathing, sleep and rays are the renderer's own (see below) and are not in the page.
+
+On a phone the result sits on top and the tiles, the cut-out, the groups and the downloads follow
+in a column under it.
 
 Press `?` for the keyboard shortcuts.
 
@@ -84,7 +105,7 @@ Press `?` for the keyboard shortcuts.
   colour among it, there is a band rich in green round the light, and the light itself is orange
   and magenta. Light runs hotter where much of it gathers and round the picture's one light
   source. The picture holds still while the sparse dots of the shade blink and dotted lines fall
-  from its lower edges (`--no-streaks`, or the Streaks switch in the web page, for none). A drawing
+  from its lower edges (`--no-streaks`, or the Drips switch in the web page, for none). A drawing
   on white paper is inverted: its lines are the light. 3 s at 24 fps.
 - **streak:** one colour (red by default) on a coarse grid, error-diffused afresh each frame so the
   figure boils, short dashes along its shapes (and drawing the texture of its shaded parts, where
@@ -108,7 +129,7 @@ work best on detailed, lit pictures: the edges and the light are what they draw.
 
 In the web page each style also has hand controls, since no one setting suits every picture: Light
 (exposure), Highlights (how big and dense the brightest light gets), and for glow Warmth (how much
-of the light turns warm) and Focus (click the picture: that point becomes the light source). Dust's drift is set
+of the light turns warm) and the hot spot (click the clip: that point becomes the light source). Dust's drift is set
 on a dial, or left on Auto.
 
 The server keeps pictures in memory while it runs, and only listens on localhost. It has no

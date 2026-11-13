@@ -47,7 +47,7 @@ WEB, IN, OUT = ROOT / 'web', ROOT / 'in', ROOT / 'out'
 PICS = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
 TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css',
          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
-         '.gif': 'image/gif', '.bmp': 'image/bmp', '.map': 'application/json'}
+         '.gif': 'image/gif', '.bmp': 'image/bmp', '.map': 'application/json', '.woff2': 'font/woff2'}
 TONE = {f for f in pm.Tone.__dataclass_fields__}
 FORMATS = ['PNG', 'JPEG', 'WEBP', 'GIF', 'BMP']
 
