@@ -780,7 +780,7 @@ function setMode(m: Mode): void {
   $('fx-bar').classList.toggle('off', live || !st.map);
   $('fx-colours').hidden = m === 'live' || m === 'glow';
   $('fx-angle').hidden = m !== 'dust';   // only dust has a direction
-  $('fx-tone').hidden = m !== 'dust';
+  $('fx-tone').hidden = true;   // dust is one colour now: no shaded / flat choice
   $('fx-streaks').hidden = m !== 'glow';
   $('tu-warmth-l').hidden = m !== 'glow';
   $('tu-focus').hidden = m !== 'glow';

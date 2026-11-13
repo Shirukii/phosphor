@@ -66,7 +66,7 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
    folder of PNGs per state, then per background), also saved to `out/<name>/`.
 7. **Glow / Streak / Dust** (the switch above the preview): the same cut-out and frame as a looping clip
    in another style, rendered on the server. Pick its size (dots across), length, scale and, for
-   glow and dust, the way the light streams or the dust drifts, and for dust, shaded greys or one flat grey; then download a GIF (for X: up to 15 MB) or an animated WebP (lossless, a fraction of the size), saved
+   dust, the way the dust streams off; then download a GIF (for X: up to 15 MB) or an animated WebP (lossless, a fraction of the size), saved
    to `out/<name>/fx/` too.
 
 ### Styled clips
@@ -84,10 +84,9 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
   figure boils, short dashes along its shapes (and drawing the texture of its shaded parts, where
   the dither leaves black), clean black round it but for loose specks gathering towards the bottom, and slanted rain
   flashing up in new places every frame. 1 s at 24 fps.
-- **dust:** grey specks gathered in small grains, each its own shade, brighter where the light is, with a faint haze round them, the outline and the
-  strongest edges drawn as bright strokes, with short flecks along the shapes and a few glints;
-  from its darker side (or along `--angle`, kept as given) the figure comes apart in curving lanes of dashes that
-  drift off and fade. 2 s at 24 fps.
+- **dust:** marks of one near-white on black: dots close together where the light is, short dashes along the
+  shapes in the shade, nearly all redrawn every couple of frames. The whole figure stays; sparse dashes stream
+  off it in curving lanes, toward the emptier side (or along `--angle`). 2 s at 24 fps.
 
 ```bash
 python tools/phosphor_fx.py in/picture.png --cutout
@@ -97,7 +96,7 @@ writes `out/picture/fx/glow.gif`, `glow.webp`, `glow/0000.png`… and the same f
 picture with transparency is taken as cut out already; `--cutout` cuts any other one out, and
 without either the whole picture is used. `--style`, `--long` (dots across the longer side: glow
 540, streak 270, dust 540), `--aspect` (`WxH`, default `1x1`), `--scale` (px per dot in the files:
-glow 2, streak 4, dust 2), `--frames`, `--fps`, `--angle` (dust), `--colour` (streak, dust), `--flat` (dust: one flat grey, no shades or haze, mid-tones in patches of checkerboard),
+glow 2, streak 4, dust 2), `--frames`, `--fps`, `--angle` (dust), `--colour` (streak, dust),
 `--seed` (by default one from the picture, so the same picture always comes out the same). All three
 work best on detailed, lit pictures: the edges and the light are what they draw.
 
