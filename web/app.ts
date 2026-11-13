@@ -170,7 +170,7 @@ function layout(): void {
   cv.style.height = r.height + 'px';
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   if (st.img) {
-    const padB = narrow.matches ? 76 : 84; // room for the tool palette
+    const padB = narrow.matches ? 120 : 128; // room for the tool palette and its options
     // fit the picture and the view together, so the frame never runs off the pane
     let [x0, y0, x1, y1] = [0, 0, st.iw, st.ih];
     if (st.view) {
@@ -402,6 +402,7 @@ function selectEye(i: number): void {
 function setTool(t: Tool): void {
   if (t === 'eyes' && fxs.mode !== 'live') t = 'box';   // eyes are the map's
   st.tool = t;
+  $('editor-box').dataset.tool = t;
   document.querySelectorAll<HTMLButtonElement>('#tools button').forEach(b => pressed(b, b.dataset.tool === t));
   cv.style.cursor = t === 'frame' ? 'grab' : t === 'eyes' ? 'crosshair' : t === 'box' ? 'crosshair' : 'none';
   draw();
@@ -1011,7 +1012,6 @@ function openFile(f: File | undefined): void {
   const rd = new FileReader();
   rd.onload = () => { const data = String(rd.result); void openPicture({ name: f.name, data }, data); };
   rd.readAsDataURL(f);
-  if (narrow.matches) showView('picture');
 }
 $<HTMLInputElement>('file').addEventListener('change', e => { const i = e.target as HTMLInputElement; openFile(i.files?.[0]); i.value = ''; });
 let dragDepth = 0;
@@ -1024,16 +1024,19 @@ addEventListener('paste', e => {
   if (f) openFile(f);
 });
 
-// ---- what the stage shows: the picture, the result, or both side by side (not on a phone)
+// ---- what the stage shows: the result; while editing the cut-out, the picture beside it (on a phone, instead of it)
 
 type Stage = 'picture' | 'split' | 'live';
+const editing = (): boolean => $('stage-box').dataset.view !== 'live';
 function showView(v: Stage): void {
   if (narrow.matches && v === 'split') v = 'picture';
   $('stage-box').dataset.view = v;
-  setSeg('view-tabs', v);
+  const b = $('edit-btn');
+  pressed(b, v !== 'live');
+  b.textContent = v === 'live' ? 'Edit cut-out' : 'Done';
   requestAnimationFrame(() => { layout(); fitPreview(); });
 }
-seg('view-tabs', v => showView(v as Stage));
+$('edit-btn').addEventListener('click', () => showView(editing() ? 'live' : 'split'));
 
 // ---- the preview full screen, the shortcuts sheet, sliders back to their defaults
 
@@ -1063,15 +1066,14 @@ addEventListener('keydown', e => {
   if (modes[e.key]) { setMode(modes[e.key]); e.preventDefault(); return; }
   if (e.key === '?') { help.showModal(); e.preventDefault(); return; }
   if (e.key.toLowerCase() === 'v' && !e.shiftKey) {
-    const order: Stage[] = narrow.matches ? ['picture', 'live'] : ['picture', 'split', 'live'];
-    showView(order[(order.indexOf($('stage-box').dataset.view as Stage) + 1) % order.length]);
+    if (st.img) showView(editing() ? 'live' : 'split');
     e.preventDefault(); return;
   }
   if (e.shiftKey && e.key.toLowerCase() === 'f') { fullScreen(); e.preventDefault(); return; }
   if (!e.shiftKey && fxs.mode !== 'live' && (e.key === 'g' || e.key === 'w') && !$<HTMLButtonElement>('fx-gif').disabled) { void downloadFx(e.key === 'g' ? 'gif' : 'webp'); e.preventDefault(); return; }
   const tools: Record<string, Tool> = { b: 'box', k: 'keep', r: 'remove', e: 'eyes', f: 'frame' };
   const k = e.key.toLowerCase();
-  if (tools[k] && st.img) { setTool(tools[k]); e.preventDefault(); }
+  if (tools[k] && st.img) { if (!editing()) showView('split'); setTool(tools[k]); e.preventDefault(); }
   else if (k === 'o') { pick(); e.preventDefault(); }
   else if ((k === '[' || k === ']') && st.img) {
     st.brush = Math.max(4, Math.min(80, st.brush + (k === ']' ? 4 : -4)));
@@ -1102,7 +1104,7 @@ async function configure(): Promise<void> {
 }
 
 new ResizeObserver(() => { layout(); fitPreview(); }).observe($('main'));
-narrow.addEventListener('change', () => showView(narrow.matches ? 'picture' : 'split'));
+narrow.addEventListener('change', () => showView(editing() ? 'split' : 'live'));
 // ---- lettering in dots: the wordmark, the styles' names, and the empty stage
 
 const GLYPHS: Record<string, string> = {   // 5 x 7, rows top to bottom, a bit per dot
@@ -1178,6 +1180,6 @@ const kept = recall();
 setSize(...(kept.size ?? [512, 512]));
 setTool('box');
 setMode(kept.mode ?? 'glow');
-showView(narrow.matches ? 'picture' : 'split');
+showView('live');
 status('Ready', 'idle');
 void configure();

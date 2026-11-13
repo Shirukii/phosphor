@@ -54,22 +54,22 @@ Then open http://localhost:8340, and drop a picture on it or pick one from `in/`
 
 Pick a style from the four tiles, which show the open picture in each: **Glow**, **Streak** or
 **Dust** make a looping clip, **Map** makes the live dot map for your own code. The stage shows the
-picture, the result, or both (`V`). The page remembers the style, its settings and the shape.
+result; the panel holds the style, its colour, Light and the clip's shape (1:1, 4:5, 3:4, 16:9,
+9:16), and the downloads: a GIF (for X: up to 15 MB) or an animated WebP (lossless, a fraction of
+the size), also saved to `out/<name>/fx/`. The page remembers the style, its settings and the shape.
 
-1. **Cut-out:** it guesses at once. Draw a box around the figure to redo it, and brush with
-   *keep* / *remove* to fix what it got wrong (Ctrl+Z undoes a mark). A picture with its own
-   transparency is used as it is.
-2. **Frame:** pick the clip's shape (1:1, 4:5, 3:4, 16:9, 9:16), then drag and scroll with the
-   *frame* tool to place the figure.
-3. **Look:** Light, Highlights, and per style: glow's Warmth, falling streaks and light source,
-   streak's and dust's colour, the way dust streams off. Double-click a slider to reset it.
-4. **Export:** detail (dots across), length and dot size, then a GIF (for X: up to 15 MB) or an
-   animated WebP (lossless, a fraction of the size), also saved to `out/<name>/fx/`.
+- **Edit cut-out** (`V`) puts the picture beside the result. The cut-out is guessed at once; draw
+  a box around the figure to redo it, brush with *keep* / *remove* to fix what it got wrong
+  (Ctrl+Z undoes a mark), and drag and scroll with the *frame* tool to place the figure. A picture
+  with its own transparency is used as it is.
+- **More** holds the rest: Highlights, glow's Warmth, falling streaks and light source, the way
+  dust streams off, detail (dots across), length, dot size and the file's name. Double-click a
+  slider to reset it.
 
 In **Map** mode the panel has the map's own steps instead: its size in dots (any up to 2048×2048),
 **Eyes** (click the middle of each eye: Phosphor paints them shut for the blink and sleep frame),
 **Tone**, and an export of `map.ts` plus PNGs per state and background as a zip. The preview there
-is the renderer itself: palettes, 1px / 2px dots, sleep, solid full light, rays, particles, blink
+is the renderer itself: palettes and 1px / 2px dots under it, and in More: sleep, solid full light, rays, particles, blink
 rate, breathing; *Neck* / *Head* place the tilt pivot and the rays' centre.
 
 Press `?` for the keyboard shortcuts.
