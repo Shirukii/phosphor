@@ -52,22 +52,26 @@ npm run web
 
 Then open http://localhost:8340, and drop a picture on it or pick one from `in/`.
 
-1. **Cut out:** it guesses at once. Draw a box around the figure to redo it, and brush with
-   *keep* / *remove* to fix what it got wrong. A picture with its own transparency is used as it
-   is.
-2. **Frame:** pick the map's size (340×280 for the Echo Show 5, or any up to 2048×2048), then drag
-   and scroll with the *frame* tool to place the figure.
-3. **Eyes:** click the middle of each eye. Phosphor paints them shut for the blink (and sleep) frame.
-4. **Tone:** shadows, contrast, white point, and so on.
-5. The live preview is the renderer itself: palettes, 1px / 2px dots, sleep, solid full light, rays,
-   particles (left, right, all), blink rate, breathing. *Set neck* / *Set head* place the tilt
-   pivot and the rays' centre.
-6. **Export:** pick colours, backgrounds, dot sizes and PNG scale. You get a zip (`map.ts`, and a
-   folder of PNGs per state, then per background), also saved to `out/<name>/`.
-7. **Glow / Streak / Dust** (the switch above the preview): the same cut-out and frame as a looping clip
-   in another style, rendered on the server. Pick its size (dots across), length, scale and, for
-   dust, the way the dust streams off; then download a GIF (for X: up to 15 MB) or an animated WebP (lossless, a fraction of the size), saved
-   to `out/<name>/fx/` too.
+Pick a style in the header: **Glow**, **Streak** or **Dust** make a looping clip, **Map** makes the
+live dot map for your own code. The page remembers the style, its settings and the shape.
+
+1. **Cut-out:** it guesses at once. Draw a box around the figure to redo it, and brush with
+   *keep* / *remove* to fix what it got wrong (Ctrl+Z undoes a mark). A picture with its own
+   transparency is used as it is.
+2. **Frame:** pick the clip's shape (1:1, 4:5, 3:4, 16:9, 9:16), then drag and scroll with the
+   *frame* tool to place the figure.
+3. **Look:** Light, Highlights, and per style: glow's Warmth, falling streaks and light source,
+   streak's and dust's colour, the way dust streams off. Double-click a slider to reset it.
+4. **Export:** detail (dots across), length and dot size, then a GIF (for X: up to 15 MB) or an
+   animated WebP (lossless, a fraction of the size), also saved to `out/<name>/fx/`.
+
+In **Map** mode the panel has the map's own steps instead: its size in dots (any up to 2048×2048),
+**Eyes** (click the middle of each eye: Phosphor paints them shut for the blink and sleep frame),
+**Tone**, and an export of `map.ts` plus PNGs per state and background as a zip. The preview there
+is the renderer itself: palettes, 1px / 2px dots, sleep, solid full light, rays, particles, blink
+rate, breathing; *Neck* / *Head* place the tilt pivot and the rays' centre.
+
+Press `?` for the keyboard shortcuts.
 
 ### Styled clips
 

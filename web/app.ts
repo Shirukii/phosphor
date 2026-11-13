@@ -1,7 +1,7 @@
-// Phosphor's web interface: a picture in, a map and PNGs out, with a live preview.
-// The server (tools/phosphor_web.py) does the image work: cut-out, framing, blink, the map, PNGs.
-// This page holds the choices (box, brush marks, eyes, view, size, tone), sends them, and draws the
-// live preview with the renderer itself.
+// Phosphor's web interface: a picture in, a looping clip out (glow, streak, dust), or a live dot map.
+// The server (tools/phosphor_web.py) does the image work: cut-out, framing, the clips, the map, PNGs.
+// This page holds the choices (box, brush marks, view, shape, the style's settings), sends them, and
+// shows the result; the map's live preview is drawn here by the renderer itself.
 
 import { Phosphor, PRESETS, type ParticlesFrom, type PhosphorMap, type Preset } from '../src/phosphor';
 
@@ -43,6 +43,19 @@ function status(text: string, kind: 'idle' | 'ok' | 'bad' = 'ok'): void {
   const m = $('mstatus');
   m.textContent = text;
   m.classList.toggle('bad', kind === 'bad');
+  if (kind === 'bad') toast(text, true);
+}
+let toastTimer = 0;
+/** A short note at the bottom of the page: errors, which the header may not have room for. */
+function toast(text: string, bad = false): void {
+  document.querySelector('.toast')?.remove();
+  const t = document.createElement('div');
+  t.className = 'toast' + (bad ? ' bad' : '');
+  t.setAttribute('role', 'status');
+  t.textContent = text;
+  document.body.append(t);
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => t.remove(), bad ? 6000 : 2500);
 }
 async function task<T>(label: string, f: () => Promise<T>): Promise<T | undefined> {
   busyCount++;
@@ -74,7 +87,7 @@ const st = {
   skip: false,
   view: null as View | null,
   framed: false,                  // the view was moved by hand: a new cut-out keeps it
-  size: [340, 280] as Pt,
+  size: [512, 512] as Pt,
   eyes: [] as Eye[],
   eyeSel: -1,
   tone: { ...toneDefaults },
@@ -386,6 +399,7 @@ function selectEye(i: number): void {
 }
 
 function setTool(t: Tool): void {
+  if (t === 'eyes' && fxs.mode !== 'live') t = 'box';   // eyes are the map's
   st.tool = t;
   document.querySelectorAll<HTMLButtonElement>('#tools button').forEach(b => pressed(b, b.dataset.tool === t));
   cv.style.cursor = t === 'frame' ? 'grab' : t === 'eyes' ? 'crosshair' : t === 'box' ? 'crosshair' : 'none';
@@ -477,7 +491,6 @@ function showPreview(): void {
   $('stage').prepend(ph.canvas);
   if (!ph.load()) { status('No WebGL in this browser: no live preview, but export still works.', 'bad'); return; }
   $('prev-empty').hidden = true;
-  $('mode-bar').classList.remove('off');
   setMode(fxs.mode);
 }
 
@@ -568,7 +581,9 @@ range('breath', v => `${v.toFixed(1)}×`, v => { look.breath = v; applyLook(); }
 range('brush', v => `${v} px`, v => { st.brush = v; draw(); });
 $<HTMLInputElement>('skip').addEventListener('change', e => { st.skip = (e.target as HTMLInputElement).checked; void cutout(); });
 $('redo-cut').addEventListener('click', () => { void cutout(); });
-$('clear-strokes').addEventListener('click', () => { st.strokes = []; void cutout(); });
+$('clear-strokes').addEventListener('click', () => { if (st.strokes.length) { st.strokes = []; void cutout(); } });
+function undoStroke(): void { if (st.strokes.pop()) { draw(); void cutout(); } }
+$('undo-stroke').addEventListener('click', undoStroke);
 
 range('eye-r', v => `${v} px`, v => {
   const i = st.eyeSel;
@@ -590,12 +605,13 @@ function setSize(W: number, H: number): void {
   st.size = [W, H];
   $<HTMLInputElement>('w').value = String(W);
   $<HTMLInputElement>('h').value = String(H);
-  $('sizes').querySelectorAll<HTMLElement>('.chip').forEach(c => pressed(c, c.dataset.v === `${W}x${H}`));
+  document.querySelectorAll<HTMLElement>('#sizes .chip, #shapes .chip').forEach(c => pressed(c, c.dataset.v === `${W}x${H}`));
+  remember();
   st.poseSet = {}; // in map px: no longer where they were
   exportSummary();
   layout(); rebuild(0);
 }
-$('sizes').addEventListener('click', e => {
+for (const id of ['sizes', 'shapes']) $(id).addEventListener('click', e => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('.chip');
   if (!b?.dataset.v) return;
   const [W, H] = b.dataset.v.split('x').map(Number);
@@ -661,7 +677,7 @@ $('export').addEventListener('click', async () => {
   });
 });
 
-// ---- styled clips: glow and streak, rendered on the server as a looping WebP (preview) or GIF
+// ---- styled clips: glow, streak and dust, rendered on the server as a looping WebP (preview) or GIF
 
 type Mode = 'live' | 'glow' | 'streak' | 'dust';
 type Style = Exclude<Mode, 'live'>;
@@ -669,7 +685,7 @@ const FX_COLOURS: [string, string][] = [['red', '#ee1111'], ['white', '#f2f2f2']
 // each style's choices (value, label), and what it starts at: glow is a slow 3 s loop at 24 fps on a
 // fine grid, streak a fast 1 s boil on a coarse one, dust a 2 s drift on a fine one
 // hand controls: sliders run -100..100 around the style's own settings (0), a factor of 2^(v/63) (about ⅓× to 3×)
-type FxSet = { long: number, frames: number, scale: number, angle: number | null, colour: string, flat?: boolean, streaks?: boolean,
+type FxSet = { long: number, frames: number, scale: number, angle: number | null, colour: string, streaks?: boolean,
   exposure: number, highlights: number, warmth: number, focus: [number, number] | null };
 const TUNE0 = { exposure: 0, highlights: 0, warmth: 0, focus: null };
 const FX: Record<Style, { long: number[], len: [number, string][], scale: number[], fps: number, d: FxSet }> = {
@@ -678,11 +694,37 @@ const FX: Record<Style, { long: number[], len: [number, string][], scale: number
   streak: { long: [180, 270, 360], len: [[12, '½ s'], [24, '1 s'], [48, '2 s']], scale: [2, 4], fps: 24,
     d: { long: 270, frames: 24, scale: 4, angle: 0, colour: 'red', ...TUNE0 } },
   dust: { long: [360, 540, 720], len: [[24, '1 s'], [48, '2 s'], [72, '3 s']], scale: [1, 2], fps: 24,
-    d: { long: 540, frames: 48, scale: 2, angle: null, colour: 'white', flat: false, ...TUNE0 } },
+    d: { long: 540, frames: 48, scale: 2, angle: null, colour: 'white', ...TUNE0 } },
 };
 // which way the dust drifts: a dial (degrees, 0 right, 90 down); auto drifts across, away from the lit side
 const fxSets: Record<Style, FxSet> = { glow: { ...FX.glow.d }, streak: { ...FX.streak.d }, dust: { ...FX.dust.d } };
-const fxs = { mode: 'live' as Mode, url: '', seq: 0, w: 0, h: 0 };
+const fxs = { mode: 'glow' as Mode, url: '', seq: 0, w: 0, h: 0, bytes: 0 };
+
+// what was chosen last time: the style, each style's settings, the shape
+const KEEP = 'phosphor.ui.1';
+function remember(): void {
+  try { localStorage.setItem(KEEP, JSON.stringify({ mode: fxs.mode, sets: fxSets, size: st.size })); } catch { /* private window: nothing kept */ }
+}
+function recall(): { mode?: Mode, size?: Pt } {
+  try {
+    const k = JSON.parse(localStorage.getItem(KEEP) || '{}') as { mode?: Mode, sets?: Partial<Record<Style, Partial<FxSet>>>, size?: Pt };
+    for (const s of ['glow', 'streak', 'dust'] as Style[]) {
+      const got = k.sets?.[s];
+      if (!got) continue;
+      const o = FX[s], d = fxSets[s];
+      if (o.long.includes(got.long!)) d.long = got.long!;
+      if (o.len.some(([v]) => v === got.frames)) d.frames = got.frames!;
+      if (o.scale.includes(got.scale!)) d.scale = got.scale!;
+      if (typeof got.colour === 'string' && (s === 'glow' || FX_COLOURS.some(([v]) => v === got.colour))) d.colour = got.colour;
+      if (got.angle === null || typeof got.angle === 'number') d.angle = got.angle;
+      if (typeof got.streaks === 'boolean') d.streaks = got.streaks;
+      for (const t of ['exposure', 'highlights', 'warmth'] as const) if (typeof got[t] === 'number' && Math.abs(got[t]!) <= 100) d[t] = got[t]!;
+    }
+    const mode = ['glow', 'streak', 'dust', 'live'].includes(k.mode!) ? k.mode : undefined;
+    const size = Array.isArray(k.size) && k.size.length === 2 && k.size.every(v => Number.isFinite(v)) ? k.size : undefined;
+    return { mode, size };
+  } catch { return {}; }
+}
 const fxSet = (): FxSet => fxSets[fxs.mode === 'live' ? 'glow' : fxs.mode];
 let fxTimer = 0;
 
@@ -698,8 +740,14 @@ function fxButtons(): void {
   for (const k of TUNE_KEYS) { const el = $<HTMLInputElement>('tu-' + k); el.value = String(c[k]); paintRange(el); $('tu-' + k + '-out').textContent = tuneText(c[k]); }
   placeFocus();
   setSeg('fx-colours', c.colour);
-  setSeg('fx-tone', c.flat ? '1' : '0');
-  setSeg('fx-streaks', c.streaks === false ? '0' : '1');
+  $<HTMLInputElement>('fx-streaks').checked = c.streaks !== false;
+  fileSize();
+}
+/** What the downloaded clip will measure. */
+function fileSize(): void {
+  const c = fxSet(), [W, H] = st.size, k = c.long / Math.max(W, H);
+  const w = Math.round(W * k) * c.scale, h = Math.round(H * k) * c.scale;
+  $('fx-size').textContent = `${w} × ${h} px · ${+(c.frames / 24).toFixed(1)} s`;
 }
 
 $('fx-colours').innerHTML = FX_COLOURS.map(([v, c]) =>
@@ -707,7 +755,7 @@ $('fx-colours').innerHTML = FX_COLOURS.map(([v, c]) =>
 seg('fx-colours', v => { fxSet().colour = v; renderFx(0); });
 seg('fx-long', v => { fxSet().long = Number(v); renderFx(0); });
 seg('fx-len', v => { fxSet().frames = Number(v); renderFx(0); });
-seg('fx-scale', v => { fxSet().scale = Number(v); });
+seg('fx-scale', v => { fxSet().scale = Number(v); fileSize(); remember(); });
 const TUNE_KEYS = ['exposure', 'highlights', 'warmth'] as const;
 const tuneF = (v: number): number => +Math.pow(2, v / 63).toFixed(3);
 const tuneText = (v: number): string => v === 0 ? '1×' : tuneF(v).toFixed(2) + '×';
@@ -717,7 +765,7 @@ $('tu-focus').addEventListener('click', () => setPickFocus(!$('fx-img').classLis
 function setPickFocus(on: boolean): void {
   $('fx-img').classList.toggle('picking', on);
   pressed($('tu-focus'), on || fxSet().focus !== null);
-  $('tu-focus').textContent = on ? 'Click the picture' : 'Focus';
+  $('tu-focus').textContent = on ? 'Click the clip…' : fxSet().focus ? 'Move light source' : 'Set light source';
 }
 $('fx-img').addEventListener('click', e => {
   const img = $<HTMLImageElement>('fx-img');
@@ -767,34 +815,39 @@ function dialSet(deg: number): void { fxSet().angle = deg; dial(deg); renderFx(0
     dialSet((((fxSet().angle ?? 0) + step) % 360 + 360) % 360);
   });
 }
-seg('fx-tone', v => { fxSet().flat = v === '1'; renderFx(0); });
-seg('fx-streaks', v => { fxSet().streaks = v === '1'; renderFx(0); });
+$<HTMLInputElement>('fx-streaks').addEventListener('change', e => { fxSet().streaks = (e.target as HTMLInputElement).checked; renderFx(0); });
 seg('mode', v => setMode(v as Mode));
 
 function setMode(m: Mode): void {
   fxs.mode = m;
   setSeg('mode', m);
+  document.body.dataset.mode = m;
   const live = m === 'live';
   if (ph) ph.canvas.hidden = !live;
   $('live-bar').classList.toggle('off', !live || !st.map);
-  $('fx-bar').classList.toggle('off', live || !st.map);
-  $('fx-colours').hidden = m === 'live' || m === 'glow';
+  $('fx-colours-row').hidden = live || m === 'glow';
   $('fx-angle').hidden = m !== 'dust';   // only dust has a direction
-  $('fx-tone').hidden = true;   // dust is one colour now: no shaded / flat choice
-  $('fx-streaks').hidden = m !== 'glow';
+  $('fx-streaks-row').hidden = m !== 'glow';
   $('tu-warmth-l').hidden = m !== 'glow';
   $('tu-focus').hidden = m !== 'glow';
-  if (m !== 'glow') setPickFocus(false); else pressed($('tu-focus'), fxSet().focus !== null);
+  setPickFocus(false);
+  if (!live && st.tool === 'eyes') setTool('box');
   fxButtons();
-  $('fx-img').hidden = live || !fxs.url;
   $('fx-wait').hidden = true;
+  $('fx-img').hidden = true;   // the last clip was another style, or another picture
+  $<HTMLButtonElement>('fx-gif').disabled = $<HTMLButtonElement>('fx-webp').disabled = true;
+  $('prev-empty').textContent = live ? 'The map plays here' : 'Your clip plays here';
+  remember();
   if (live) {
-    if (picking) setPicking(null);
+    if (!st.map) setAccent(look.preset);
     fxs.seq++; // a clip still on its way is no longer wanted
-    if (st.map) $('live-meta').textContent = `${st.map.w} × ${st.map.h} · live`;
-    fitPreview();
+    if (st.map) { $('live-meta').textContent = `${st.map.w} × ${st.map.h} · live`; status('Ready', 'ok'); }
+    $('prev-empty').hidden = !!st.map;
+    requestAnimationFrame(() => { layout(); fitPreview(); });
   } else {
-    $('fx-img').hidden = true; // the last clip was another style, or another picture
+    if (picking) setPicking(null);
+    $('prev-empty').hidden = !!st.id;
+    requestAnimationFrame(layout);
     renderFx(0);
   }
 }
@@ -802,7 +855,7 @@ function setMode(m: Mode): void {
 function fxBody(format: string, scale: number, save: boolean): object {
   const name = ($<HTMLInputElement>('name').value.trim() || st.name).replace(/[^A-Za-z0-9_.-]+/g, '-');
   return { ...params(), style: fxs.mode, long: fxSet().long, frames: fxSet().frames, angle: fxs.mode === 'dust' ? fxSet().angle ?? undefined : undefined,
-    colour: fxSet().colour || undefined, flat: fxs.mode === 'dust' ? fxSet().flat : undefined,
+    colour: fxSet().colour || undefined,
     streaks: fxs.mode === 'glow' ? fxSet().streaks !== false : undefined, tune: tuneBody(), format, scale, name,
     save: save && !server.public && $<HTMLInputElement>('save').checked };
 }
@@ -819,6 +872,7 @@ async function fxFetch(format: string, scale: number, save = false): Promise<Res
 
 function renderFx(ms = 600): void {
   clearTimeout(fxTimer);
+  fileSize(); remember();
   if (fxs.mode === 'live' || !st.id || !st.view) return;
   fxTimer = window.setTimeout(() => { void drawFx(); }, ms);
 }
@@ -835,17 +889,19 @@ async function drawFx(): Promise<void> {
   await new Promise<void>(ok => { img.onload = () => ok(); img.onerror = () => ok(); img.src = url; });
   if (fxs.url) URL.revokeObjectURL(fxs.url);
   fxs.url = url;
-  fxs.w = img.naturalWidth; fxs.h = img.naturalHeight;
+  fxs.w = img.naturalWidth; fxs.h = img.naturalHeight; fxs.bytes = blob.size;
   img.hidden = fxs.mode === 'live';
-  $('live-meta').textContent = `${fxs.w} × ${fxs.h} · ${fxSet().frames} frames · ${+(fxSet().frames / FX[mode as Style].fps).toFixed(2)} s loop`;
+  $('prev-empty').hidden = true;
+  $<HTMLButtonElement>('fx-gif').disabled = $<HTMLButtonElement>('fx-webp').disabled = false;
+  $('live-meta').textContent = `${fxs.w} × ${fxs.h} dots · ${fxSet().frames} frames`;
   status('Ready', 'ok');
   fitFx();
 }
 function fitFx(): void {
   if (!fxs.w) return;
   const r = $('preview-box').getBoundingClientRect(), img = $<HTMLImageElement>('fx-img');
-  const room = Math.min((r.width - 32) / fxs.w, (r.height - 2 * ($('fx-bar').getBoundingClientRect().height + 28)) / fxs.h);
-  const z = room >= 1 ? Math.floor(room) : Math.max(0.1, room);
+  const room = Math.min((r.width - 32) / fxs.w, (r.height - 32) / fxs.h);
+  const z = room >= 1 ? Math.floor(room * 2) / 2 : Math.max(0.1, room);   // half steps: a coarse clip still fills the pane
   img.style.width = fxs.w * z + 'px';
   img.style.height = fxs.h * z + 'px';
   placeFocus();
@@ -861,7 +917,9 @@ async function downloadFx(format: 'gif' | 'webp'): Promise<void> {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     const saved = r.headers.get('X-Saved');
-    status(`Downloaded ${name} (${(blob.size / 1048576).toFixed(1)} MB)${saved ? ` · saved to ${saved}/` : ''}`, 'ok');
+    const mb = blob.size / 1048576;
+    status(`Downloaded ${name} (${mb < 1 ? Math.round(blob.size / 1024) + ' KB' : mb.toFixed(1) + ' MB'})${saved ? ` · saved to ${saved}/` : ''}`, 'ok');
+    toast(`${name} · ${mb < 1 ? Math.round(blob.size / 1024) + ' KB' : mb.toFixed(1) + ' MB'}`);
   });
 }
 $('fx-gif').addEventListener('click', () => void downloadFx('gif'));
@@ -914,11 +972,35 @@ function showView(v: 'picture' | 'live'): void {
 }
 seg('view-tabs', v => showView(v as 'picture' | 'live'));
 
-// ---- keys: B K R E F for the tools, [ ] for the brush, O to open
+// ---- the preview full screen, the shortcuts sheet, sliders back to their defaults
+
+function fullScreen(): void {
+  if (document.fullscreenElement) void document.exitFullscreen();
+  else void $('preview-box').requestFullscreen?.().catch(() => { /* not allowed here */ });
+}
+$('full-btn').addEventListener('click', fullScreen);
+document.addEventListener('fullscreenchange', () => requestAnimationFrame(fitPreview));
+const help = $<HTMLDialogElement>('help');
+$('help-btn').addEventListener('click', () => help.showModal());
+help.addEventListener('click', e => { if (e.target === help) help.close(); });   // a click on the backdrop
+document.addEventListener('dblclick', e => {
+  const r = (e.target as HTMLElement).closest<HTMLInputElement>('input[type=range]');
+  if (!r || r.disabled || r.value === r.defaultValue) return;
+  r.value = r.defaultValue;
+  r.dispatchEvent(new Event('input', { bubbles: true }));
+});
+
+// ---- keys: 1-4 for the styles, B K R E F for the tools, [ ] for the brush, O to open, G W to download
 
 addEventListener('keydown', e => {
-  const t = e.target as HTMLElement;
-  if (e.metaKey || e.ctrlKey || e.altKey || t.closest('input, select, textarea')) return;
+  const t = e.target instanceof Element ? e.target : document.body;
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'z' && !t.closest('input[type=text], input[type=number], textarea')) { undoStroke(); e.preventDefault(); return; }
+  if (e.metaKey || e.ctrlKey || e.altKey || help.open || t.closest('input[type=text], input[type=number], select, textarea')) return;
+  const modes: Record<string, Mode> = { 1: 'glow', 2: 'streak', 3: 'dust', 4: 'live' };
+  if (modes[e.key]) { setMode(modes[e.key]); e.preventDefault(); return; }
+  if (e.key === '?') { help.showModal(); e.preventDefault(); return; }
+  if (e.shiftKey && e.key.toLowerCase() === 'f') { fullScreen(); e.preventDefault(); return; }
+  if (!e.shiftKey && fxs.mode !== 'live' && (e.key === 'g' || e.key === 'w') && !$<HTMLButtonElement>('fx-gif').disabled) { void downloadFx(e.key === 'g' ? 'gif' : 'webp'); e.preventDefault(); return; }
   const tools: Record<string, Tool> = { b: 'box', k: 'keep', r: 'remove', e: 'eyes', f: 'frame' };
   const k = e.key.toLowerCase();
   if (tools[k] && st.img) { setTool(tools[k]); e.preventDefault(); }
@@ -932,29 +1014,19 @@ addEventListener('keydown', e => {
 
 // ---- start
 
-/** The empty preview: a little field of dots, some lit. */
-function ghost(): void {
-  const dots: string[] = [];
-  for (let y = 0; y < 8; y++) for (let x = 0; x < 12; x++) {
-    const d = Math.hypot(x - 5.5, (y - 3.5) * 1.4);
-    if (d < 5.2) dots.push(`<circle cx="${x * 10 + 5}" cy="${y * 10 + 5}" r="2" opacity="${d < 3 ? 0.9 : 0.35}"/>`);
-  }
-  $('ghost-dots').innerHTML = dots.join('');
-}
-
 /** What this server allows: on the public site there is no in/ or out/, and smaller limits. */
 async function configure(): Promise<void> {
   try {
     server = await (await fetch('/api/config')).json() as typeof server;
   } catch { status('The server is not answering.', 'bad'); return; }
   if (server.public) {
-    $('privacy').textContent = 'PNG, JPEG, WebP, GIF or BMP, up to 16 MB. Your picture stays on the server only while you work, and is never stored.';
+    $('privacy').textContent = 'or paste one. Up to 16 MB; nothing is stored.';
   } else {
     $('save-row').hidden = false;
     void listInputs();
   }
   for (const id of ['w', 'h']) $<HTMLInputElement>(id).max = String(server.maxSize);
-  $('sizes').querySelectorAll<HTMLElement>('.chip').forEach(c => {
+  document.querySelectorAll<HTMLElement>('#sizes .chip, #shapes .chip').forEach(c => {
     const [W, H] = c.dataset.v!.split('x').map(Number);
     c.hidden = W > server.maxSize || H > server.maxSize;
   });
@@ -963,8 +1035,9 @@ async function configure(): Promise<void> {
 
 new ResizeObserver(() => { layout(); fitPreview(); }).observe($('main'));
 narrow.addEventListener('change', () => showView('picture'));
-setSize(340, 280);
+const kept = recall();
+setSize(...(kept.size ?? [512, 512]));
 setTool('box');
-ghost();
+setMode(kept.mode ?? 'glow');
 status('Ready', 'idle');
 void configure();
