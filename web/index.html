@@ -156,8 +156,11 @@
   details.step > summary::-webkit-details-marker { display: none; }
   details.step > summary .aside { color: var(--faint); transition: transform .15s; }
   details.step[open] > summary .aside { transform: rotate(180deg); }
-  details.step:not([open]) { gap: 0; }
-  body:not(.has-pic) .side-scroll > .step:not(.styles), body:not(.has-pic) .dock { opacity: .32; pointer-events: none; }
+  details.step { display: block; }
+  .more-body { display: grid; gap: 12px; margin-top: 14px; }
+  #help-btn { justify-self: start; padding: 0; }
+  body:not(.has-pic) .side { display: none; }
+  body:not(.has-pic) main { grid-template-columns: minmax(0, 1fr); }
 
   /* the styles: four tiles, each showing the open picture in that style */
   .styles { padding: 14px 18px 16px; }
@@ -185,7 +188,7 @@
   .swatch-row button { width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
   .swatch-row .sw { display: block; width: 100%; height: 100%; border-radius: 50%; }
   .swatch-row button[aria-pressed=true] .sw { box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--ink); }
-  #fx-dial { width: 28px; height: 28px; margin: 0 2px 0 4px; cursor: grab; touch-action: none; border-radius: 50%; color: var(--ink); }
+  #fx-dial { width: 34px; height: 34px; margin: 0 2px 0 4px; cursor: grab; touch-action: none; border-radius: 50%; color: var(--ink); }
   #fx-dial:active { cursor: grabbing; }
   #fx-dial.auto { color: var(--faint); }
 
@@ -210,7 +213,6 @@
   body:not(.has-pic) #edit-btn { display: none; }
   #edit-btn { padding: 0 10px; }
   #edit-btn[aria-pressed=true] { color: var(--accent); border-color: var(--accent-line); }
-  details.step[open] > summary { margin-bottom: 2px; }
   .seg button { padding: 0 8px; }
   .step hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
   .drop-note select { pointer-events: auto; background-color: #000; }
@@ -271,6 +273,7 @@
     .top { position: sticky; top: 0; z-index: 8; background: #000; gap: 10px; padding: 0 12px; }
         main { grid-template-columns: minmax(0, 1fr); }
     .stage { height: min(62vh, 560px); border-bottom: 1px solid var(--line); }
+    body:not(.has-pic) .stage { height: calc(100vh - 48px); height: calc(100dvh - 48px); border-bottom: 0; }
     .side { border-left: 0; grid-template-rows: auto auto; }
     .side-scroll { overflow: visible; }
     .dock { position: sticky; bottom: 0; background: #000; z-index: 5; padding-bottom: max(14px, env(safe-area-inset-bottom)); }
@@ -291,7 +294,7 @@
 <header class="top" id="top">
   <a class="brand" href="./" aria-label="Phosphor" id="brand"></a>
   <div class="spacer"></div>
-  <button class="btn ghost" id="edit-btn" aria-pressed="false" title="Cut-out and framing (V)">Edit cut-out</button>
+  <button class="btn ghost" id="edit-btn" aria-pressed="false" title="Place the picture in the frame, and fix its cut-out (V)">Crop &amp; cut-out</button>
   <button class="btn" id="open" title="Open a picture (O)">Open</button>
   <input id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden>
   <div id="file-meta" hidden></div>
@@ -308,7 +311,7 @@
         <canvas id="src"></canvas>
         <div class="opts" id="opts">
           <label class="switch for-box"><span>Use the whole picture</span><input type="checkbox" id="skip"></label>
-          <button class="btn ghost sm for-box" id="redo-cut" title="Find the figure again">Find again</button>
+          <button class="btn ghost sm for-box" id="redo-cut" title="Drop the box and brush marks, and find the figure afresh">Start over</button>
           <div class="range for-brush"><label for="brush">Brush</label><input type="range" id="brush" min="4" max="80" value="20"><output id="brush-out">20 px</output></div>
           <button class="btn ghost sm for-brush" id="undo-stroke" title="Undo the last brush mark (Ctrl+Z)">Undo</button>
           <button class="btn ghost sm for-brush" id="clear-strokes" title="Remove every brush mark">Clear</button>
@@ -389,6 +392,7 @@
       <details class="step" id="more">
         <summary class="step-head"><h2>More</h2>
           <svg class="aside" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></summary>
+        <div class="more-body">
         <div class="only-clip stack">
           <div class="range"><label for="tu-highlights">Highlights</label><output id="tu-highlights-out"></output><input type="range" id="tu-highlights" min="-100" max="100" step="5" value="0"></div>
           <div class="range" id="tu-warmth-l"><label for="tu-warmth">Warmth</label><output id="tu-warmth-out"></output><input type="range" id="tu-warmth" min="-100" max="100" step="5" value="0"></div>
@@ -417,11 +421,12 @@
         <div class="sub inline"><span class="label">Name</span><input class="field" type="text" id="name" placeholder="name" aria-label="File name" spellcheck="false" autocomplete="off"></div>
         <label class="switch" id="save-row" hidden><span>Also save to out/</span><input type="checkbox" id="save" checked></label>
         <button class="btn ghost sm" id="help-btn">Keyboard shortcuts</button>
+        </div>
       </details>
     </div>
 
     <div class="dock">
-      <div class="summary only-clip"><span>Clip</span><strong id="fx-size">–</strong></div>
+      <div class="summary only-clip"><span>Download</span><strong id="fx-size">–</strong></div>
       <div class="row split only-clip">
         <button class="btn primary" id="fx-gif" disabled title="Download a GIF (G)">GIF</button>
         <button class="btn primary" id="fx-webp" disabled title="Download an animated WebP: the same dots, much smaller (W)">WebP</button>
@@ -437,7 +442,7 @@
   <dl>
     <dt><kbd>O</kbd></dt><dd>Open a picture (or drop or paste one)</dd>
     <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd></dt><dd>Glow, Streak, Dust, Map</dd>
-    <dt><kbd>V</kbd></dt><dd>Edit the cut-out, and back</dd>
+    <dt><kbd>V</kbd></dt><dd>Crop &amp; cut-out, and back (<kbd>Esc</kbd> leaves it)</dd>
     <dt><kbd>B</kbd> <kbd>K</kbd> <kbd>R</kbd> <kbd>F</kbd></dt><dd>Box, Keep, Remove, Frame</dd>
     <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Brush smaller, bigger</dd>
     <dt><kbd>Ctrl</kbd> <kbd>Z</kbd></dt><dd>Undo the last brush mark</dd>

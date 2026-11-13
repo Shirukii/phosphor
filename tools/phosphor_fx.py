@@ -365,6 +365,9 @@ def drip(frames: np.ndarray, P: Glow, seed: int) -> np.ndarray:
     for reach in (P.drip_len[1] // 2, P.drip_len[0]):
         clear = np.ones((h, w), bool)
         for k in range(1, reach + 1):
+            if k >= h:   # a frame shorter than the line: no room under anything
+                clear[:] = False
+                break
             clear[:h - k] &= ~lit[k:]
             clear[h - k:] = False
         ys, xs = np.where(lit & clear & solid & (np.arange(w)[None, :] % 2 == 0))

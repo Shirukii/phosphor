@@ -82,7 +82,9 @@ const st = {
   mask: null as HTMLImageElement | null,
   rect: null as [number, number, number, number] | null,
   strokes: [] as Stroke[],
+  marks: [] as number[],            // where each brush mark starts in strokes, for undo
   skip: false,
+  hasAlpha: false,                // the picture came with its own transparency
   view: null as View | null,
   framed: false,                  // the view was moved by hand: a new cut-out keeps it
   size: [512, 512] as Pt,
@@ -263,6 +265,7 @@ cv.addEventListener('pointerdown', e => {
   } else if (st.tool === 'keep' || st.tool === 'remove') {
     if (st.skip) setSkip(false);
     drag = { kind: 'paint', start: p, last: p, touch };
+    st.marks.push(st.strokes.length);
     dab(p);
   } else if (st.tool === 'frame' && st.view) {
     drag = { kind: 'view', start: p, last: p, view: [...st.view] as View, touch };
@@ -357,7 +360,7 @@ async function openPicture(body: { name: string; data?: string }, src: string): 
   const img = await loadImg(src).catch(() => null);
   if (!img) { status('Could not show that picture.', 'bad'); return; }
   Object.assign(st, {
-    id: r.id, name: r.name, iw: r.w, ih: r.h, img, mask: null, rect: null, strokes: [], view: null, framed: false,
+    id: r.id, name: r.name, iw: r.w, ih: r.h, img, mask: null, rect: null, strokes: [], marks: [], hasAlpha: r.hasAlpha, view: null, framed: false,
     map: null, frames: 1,
   });
   $<HTMLInputElement>('name').value = r.name;
@@ -371,7 +374,15 @@ async function openPicture(body: { name: string; data?: string }, src: string): 
   await cutout();
 }
 
+// one cut-out at a time: the server keeps the last one to finish, so an older, slower request must
+// not land after a newer one
+let cutBusy = false, cutAgain = false;
 async function cutout(): Promise<void> {
+  if (cutBusy) { cutAgain = true; return; }
+  cutBusy = true;
+  try { do { cutAgain = false; await cutoutOnce(); } while (cutAgain); } finally { cutBusy = false; }
+}
+async function cutoutOnce(): Promise<void> {
   if (!st.id) return;
   const r = await task(st.skip ? 'Using the whole picture…' : 'Finding the figure…', () => post<{ mask: string; view: View; empty: boolean }>('/api/cutout', {
     id: st.id, rect: st.rect, strokes: st.strokes, skip: st.skip, size: st.size,
@@ -481,28 +492,47 @@ toggle('full', v => { look.full = v; applyLook(); });
 
 range('brush', v => `${v} px`, v => { st.brush = v; draw(); });
 $<HTMLInputElement>('skip').addEventListener('change', e => { st.skip = (e.target as HTMLInputElement).checked; void cutout(); });
-$('redo-cut').addEventListener('click', () => { void cutout(); });
-$('clear-strokes').addEventListener('click', () => { if (st.strokes.length) { st.strokes = []; void cutout(); } });
-function undoStroke(): void { if (st.strokes.pop()) { draw(); void cutout(); } }
+$('redo-cut').addEventListener('click', () => { st.rect = null; st.strokes = []; st.marks = []; setSkip(st.hasAlpha); void cutout(); });   // as it opened: no box, no marks
+$('clear-strokes').addEventListener('click', () => { if (st.strokes.length) { st.strokes = []; st.marks = []; untouched(); void cutout(); } });
+function undoStroke(): void {
+  const from = st.marks.pop();
+  if (from === undefined) return;
+  st.strokes.length = from;
+  untouched();
+  draw(); void cutout();
+}
+/** With no box and no marks left, a picture with its own transparency goes back to using it. */
+function untouched(): void { if (!st.strokes.length && !st.rect && st.hasAlpha) setSkip(true); }
 $('undo-stroke').addEventListener('click', undoStroke);
 
 range('zoom', () => st.view ? `${Math.round(st.iw / st.view[2] * 100)}%` : '–', v => { if (st.iw) zoomView(st.iw / Math.pow(2, v)); });
 
 // size
+const sizes = { clip: [512, 512] as Pt, map: [512, 512] as Pt };   // the clip's shape, the map's size
+const SHAPES = ['512x512', '512x640', '480x640', '640x360', '360x640'];
 function setSize(W: number, H: number): void {
   W = Math.max(8, Math.min(server.maxSize, Math.round(W) || 8));
   H = Math.max(8, Math.min(server.maxSize, Math.round(H) || 8));
+  if (fxs.mode !== 'live' && !SHAPES.includes(`${W}x${H}`)) [W, H] = [512, 512];
   if (st.view) { // keep the middle and width; the height follows
     const [x, y, w] = st.view, cy = y + w * st.size[1] / st.size[0] / 2;
     st.view = [x, cy - w * H / W / 2, w];
   }
-  st.size = [W, H];
+  st.size = sizes[fxs.mode === 'live' ? 'map' : 'clip'] = [W, H];
   $<HTMLInputElement>('w').value = String(W);
   $<HTMLInputElement>('h').value = String(H);
   document.querySelectorAll<HTMLElement>('#sizes .chip, #shapes .chip').forEach(c => pressed(c, c.dataset.v === `${W}x${H}`));
   remember();
   exportSummary();
-  layout(); rebuild(0);
+  if (st.id && !st.framed) void autoFrame();   // not placed by hand: fit the figure to the new shape
+  else { layout(); rebuild(0); }
+}
+async function autoFrame(): Promise<void> {
+  if (!st.id) return;
+  const r = await task('Framing…', () => post<{ view: View }>('/api/view', { id: st.id, size: st.size }));
+  if (!r) return;
+  st.view = r.view; st.framed = false;
+  syncZoom(); layout(); rebuild(0);
 }
 for (const id of ['sizes', 'shapes']) $(id).addEventListener('click', e => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('.chip');
@@ -511,13 +541,7 @@ for (const id of ['sizes', 'shapes']) $(id).addEventListener('click', e => {
   setSize(W, H);
 });
 for (const id of ['w', 'h']) $(id).addEventListener('change', () => setSize(Number($<HTMLInputElement>('w').value), Number($<HTMLInputElement>('h').value)));
-$('auto-frame').addEventListener('click', async () => {
-  if (!st.id) return;
-  const r = await task('Framing…', () => post<{ view: View }>('/api/view', { id: st.id, size: st.size }));
-  if (!r) return;
-  st.view = r.view; st.framed = false;
-  syncZoom(); layout(); rebuild(0);
-});
+$('auto-frame').addEventListener('click', () => void autoFrame());
 
 // tone
 const toneEl = $('tone');
@@ -596,11 +620,11 @@ const fxs = { mode: 'glow' as Mode, url: '', seq: 0, w: 0, h: 0, bytes: 0 };
 // what was chosen last time: the style, each style's settings, the shape
 const KEEP = 'phosphor.ui.1';
 function remember(): void {
-  try { localStorage.setItem(KEEP, JSON.stringify({ mode: fxs.mode, sets: fxSets, size: st.size })); } catch { /* private window: nothing kept */ }
+  try { localStorage.setItem(KEEP, JSON.stringify({ mode: fxs.mode, sets: fxSets, size: sizes.clip, mapSize: sizes.map })); } catch { /* private window: nothing kept */ }
 }
-function recall(): { mode?: Mode, size?: Pt } {
+function recall(): { mode?: Mode, size?: Pt, mapSize?: Pt } {
   try {
-    const k = JSON.parse(localStorage.getItem(KEEP) || '{}') as { mode?: Mode, sets?: Partial<Record<Style, Partial<FxSet>>>, size?: Pt };
+    const k = JSON.parse(localStorage.getItem(KEEP) || '{}') as { mode?: Mode, sets?: Partial<Record<Style, Partial<FxSet>>>, size?: Pt, mapSize?: Pt };
     for (const s of ['glow', 'streak', 'dust'] as Style[]) {
       const got = k.sets?.[s];
       if (!got) continue;
@@ -614,8 +638,8 @@ function recall(): { mode?: Mode, size?: Pt } {
       for (const t of ['exposure', 'highlights', 'warmth'] as const) if (typeof got[t] === 'number' && Math.abs(got[t]!) <= 100) d[t] = got[t]!;
     }
     const mode = ['glow', 'streak', 'dust', 'live'].includes(k.mode!) ? k.mode : undefined;
-    const size = Array.isArray(k.size) && k.size.length === 2 && k.size.every(v => Number.isFinite(v)) ? k.size : undefined;
-    return { mode, size };
+    const pair = (v?: Pt): Pt | undefined => Array.isArray(v) && v.length === 2 && v.every(n => Number.isFinite(n)) ? v : undefined;
+    return { mode, size: pair(k.size), mapSize: pair(k.mapSize) };
   } catch { return {}; }
 }
 const fxSet = (): FxSet => fxSets[fxs.mode === 'live' ? 'glow' : fxs.mode];
@@ -639,7 +663,8 @@ function fxButtons(): void {
 /** What the downloaded clip will measure. */
 function fileSize(): void {
   const c = fxSet(), [W, H] = st.size, k = c.long / Math.max(W, H);
-  const w = Math.round(W * k) * c.scale, h = Math.round(H * k) * c.scale;
+  const rnd = (x: number): number => { const f = Math.floor(x), d = x - f; return d > 0.5 || (d === 0.5 && f % 2 === 1) ? f + 1 : f; };
+  const w = Math.max(8, rnd(W * k)) * c.scale, h = Math.max(8, rnd(H * k)) * c.scale;
   $('fx-size').textContent = `${w} × ${h} px · ${+(c.frames / 24).toFixed(1)} s`;
 }
 
@@ -653,7 +678,10 @@ const TUNE_KEYS = ['exposure', 'highlights', 'warmth'] as const;
 const tuneF = (v: number): number => +Math.pow(2, v / 63).toFixed(3);
 const tuneText = (v: number): string => v === 0 ? '1×' : tuneF(v).toFixed(2) + '×';
 for (const k of TUNE_KEYS) range('tu-' + k, tuneText, v => { fxSet()[k] = v; renderFx(); });
-$('tu-reset').addEventListener('click', () => { Object.assign(fxSet(), TUNE0); setPickFocus(false); fxButtons(); renderFx(0); });
+$('tu-reset').addEventListener('click', () => {
+  if (fxs.mode === 'live') return;
+  const d = FX[fxs.mode].d;
+  Object.assign(fxSet(), TUNE0, { streaks: d.streaks, angle: d.angle }); setPickFocus(false); fxButtons(); renderFx(0); });
 $('tu-focus').addEventListener('click', () => setPickFocus(!$('fx-img').classList.contains('picking')));
 function setPickFocus(on: boolean): void {
   $('fx-img').classList.toggle('picking', on);
@@ -713,6 +741,8 @@ seg('mode', v => setMode(v as Mode));
 
 function setMode(m: Mode): void {
   fxs.mode = m;
+  const want = sizes[m === 'live' ? 'map' : 'clip'];
+  if (want[0] !== st.size[0] || want[1] !== st.size[1]) setSize(want[0], want[1]);
   setSeg('mode', m);
   document.body.dataset.mode = m;
   const live = m === 'live';
@@ -914,7 +944,7 @@ function showView(v: Stage): void {
   $('stage-box').dataset.view = v;
   const b = $('edit-btn');
   pressed(b, v !== 'live');
-  b.textContent = v === 'live' ? 'Edit cut-out' : 'Done';
+  b.textContent = v === 'live' ? 'Crop & cut-out' : 'Done';
   requestAnimationFrame(() => { layout(); fitPreview(); });
 }
 $('edit-btn').addEventListener('click', () => showView(editing() ? 'live' : 'split'));
@@ -956,6 +986,10 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (tools[k] && st.img) { if (!editing()) showView('split'); setTool(tools[k]); e.preventDefault(); }
   else if (k === 'o') { pick(); e.preventDefault(); }
+  else if (k === 'escape') {   // out of whatever is in hand: picking the light source, then the editor
+    if ($('fx-img').classList.contains('picking')) setPickFocus(false);
+    else if (editing()) showView('live');
+  }
   else if ((k === '[' || k === ']') && st.img) {
     st.brush = Math.max(4, Math.min(80, st.brush + (k === ']' ? 4 : -4)));
     setRange('brush', st.brush, `${st.brush} px`);
@@ -1058,6 +1092,7 @@ document.querySelectorAll<HTMLElement>('[data-dm]').forEach(el => { el.innerHTML
 }
 
 const kept = recall();
+if (kept.mapSize) sizes.map = kept.mapSize;
 setSize(...(kept.size ?? [512, 512]));
 setTool('box');
 setMode(kept.mode ?? 'glow');

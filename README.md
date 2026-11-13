@@ -58,9 +58,10 @@ result; the panel holds the style, its colour, Light and the clip's shape (1:1, 
 9:16), and the downloads: a GIF (for X: up to 15 MB) or an animated WebP (lossless, a fraction of
 the size), also saved to `out/<name>/fx/`. The page remembers the style, its settings and the shape.
 
-- **Edit cut-out** (`V`) puts the picture beside the result. The cut-out is guessed at once; draw
+- **Crop & cut-out** (`V`, `Esc` to leave) puts the picture beside the result. The cut-out is guessed at once; draw
   a box around the figure to redo it, brush with *keep* / *remove* to fix what it got wrong
-  (Ctrl+Z undoes a mark), and drag and scroll with the *frame* tool to place the figure. A picture
+  (Ctrl+Z undoes a mark, *Start over* drops them all), and drag and scroll with the *frame* tool to
+  place the figure. A new shape frames the figure again unless you placed it by hand. A picture
   with its own transparency is used as it is.
 - **More** holds the rest: Highlights, glow's Warmth, falling streaks and light source, the way
   dust streams off, detail (dots across), length, dot size and the file's name. Double-click a
